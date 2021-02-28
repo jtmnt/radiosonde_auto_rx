@@ -246,7 +246,7 @@
                         sonde_id_data.vel_h = (sonde_id_data.vel_h*3.6).toFixed(1);
                         
                         // Add a link to sondehub.org or radiosondy.info if enabled.
-                        if (autorx_config.habitat_enabled == true) {
+                        if (autorx_config.habitat_enabled == true && autorx_config.aprs_enabled == false) {
                             sonde_id_data.id = "<a href='http://sondehub.org/" + sonde_id + "' target='_blank'>" + sonde_id + "</a>";
                         } else if (autorx_config.aprs_enabled == true && autorx_config.aprs_server == "radiosondy.info") {
                             sonde_id_data.id = "<a href='https://radiosondy.info/sonde_archive.php?sondenumber=" + sonde_id + "' target='_blank'>" + sonde_id + "</a>";
