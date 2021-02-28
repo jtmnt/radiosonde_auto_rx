@@ -797,6 +797,12 @@ class APRSUploader(object):
 
         # Add it to the queue if we are running.
         if self.input_processing_running:
+            if float(telemetry['vel_v']) < -1 and float(telemetry['alt']) < 500:
+                self.synchronous_upload_time = 5
+            elif float(telemetry['vel_v']) < -1 and float(telemetry['alt']) < 1000:
+                self.synchronous_upload_time = 10
+            else:
+                self.synchronous_upload_time = 30
             self.input_queue.put(telemetry)
         else:
             self.log_error("Processing not running, discarding.")
