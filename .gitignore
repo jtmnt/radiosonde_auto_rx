@@ -42,4 +42,3 @@ scan/rs_detect
 *.pyc
 *.o
 .vscode
-/.vs
