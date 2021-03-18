@@ -514,6 +514,26 @@ def read_auto_rx_config(filename, no_sdr_test=False):
             auto_rx_config["sondehub_enabled"] = True
             auto_rx_config["sondehub_upload_rate"] = 15
 
+        try:
+            auto_rx_config["experimental_decoders"]["MRZ"] = config.getboolean(
+                "advanced", "mrz_experimental"
+            )
+        except:
+            logging.warning(
+                "Config - Did not find MRZ decoder experimental decoder setting, using default (disabled)."
+            )
+            auto_rx_config["experimental_decoders"]["MRZ"] = False
+
+        try:
+            auto_rx_config["experimental_decoders"]["IMET5"] = config.getboolean(
+                "advanced", "imet54_experimental"
+            )
+        except:
+            logging.warning(
+                "Config - Did not find iMet-54 decoder experimental decoder setting, using default (disabled)."
+            )
+            auto_rx_config["experimental_decoders"]["IMET5"] = False
+
         # If we are being called as part of a unit test, just return the config now.
         if no_sdr_test:
             return auto_rx_config
