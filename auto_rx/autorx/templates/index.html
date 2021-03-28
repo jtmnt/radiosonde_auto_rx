@@ -417,7 +417,7 @@
                         sonde_id_data.vel_v = sonde_id_data.vel_v.toFixed(1);
                         sonde_id_data.vel_h = (sonde_id_data.vel_h*3.6).toFixed(1);
                         // Add a link to HabHub if we have habitat enabled.
-                        if (autorx_config.habitat_enabled == true) {
+                        if (autorx_config.habitat_enabled == true && autorx_config.aprs_enabled == false) {
                             // Add a link to HabHub card if sonde is old.
                             if (sonde_id_data.age != "old") {
                                 sonde_id_data.id = "<a href='http://sondehub.org/" + sonde_id + "' target='_blank'>" + sonde_id  + "</a>";
