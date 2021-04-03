@@ -5,6 +5,10 @@ body {
   overflow: hidden;
 }
 
+p {
+  margin: 0.3vh;   
+}
+
 body {
   font-family: "Roboto", sans-serif;
   display: flex;
@@ -35,7 +39,7 @@ body {
 }
 
 .settings {
-  height: 100vh;
+  height: 100%;
   width: 0;
   position: fixed;
   z-index: 1;
@@ -46,6 +50,9 @@ body {
   transition: 0.5s;
   padding-top: 20px;
   text-align: centre;
+  flex: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .settings form {
@@ -64,7 +71,9 @@ body {
 }
 
 .scrollsettings {
-  height: 80vh;
+  flex: auto;
+  display: flex;
+  flex-direction: column;
   overflow-y: scroll;
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -117,7 +126,6 @@ body {
   background-color: #2196F3;
   color: white;
 }
-
 
 .footer {
   font-size: 15px;
@@ -276,9 +284,15 @@ input:checked + .slider:before {
     stroke: #ff7f0e;
 }
 
+#scan_chart .c3-tooltip-container {
+    width: 200px;
+    color: black;
+}
+
 #telem_table a:link, #telem_table a:visited {
     font-weight: bold;
     text-decoration: none;
+    color:inherit;
 }
 
 @media (prefers-color-scheme: dark) {
