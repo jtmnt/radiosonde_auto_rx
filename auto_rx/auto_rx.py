@@ -293,7 +293,7 @@ def handle_scan_results():
                             if abs(_key - _freq) < config["decoder_spacing_limit"]:
                                 # At this point, we can be pretty sure that there is another decoder already decoding this particular sonde ID.
                                 # Without actually starting another decoder and matching IDs, we can't be 100% sure, but it's a good chance.
-                                logging.error(
+                                logging.warning(
                                     "Task Manager - Detected %s sonde on %.3f MHz, but this is within %d kHz of an already running decoder. (This limit can be set using the 'decoder_spacing_limit' advanced config option.)"
                                     % (
                                         _type,
@@ -314,7 +314,7 @@ def handle_scan_results():
                     if temporary_block_list[_freq] > (
                         time.time() - config["temporary_block_time"] * 60
                     ):
-                        logging.error(
+                        logging.warning(
                             "Task Manager - Attempted to start a decoder on a temporarily blocked frequency (%.3f MHz)"
                             % (_freq / 1e6)
                         )
@@ -343,7 +343,7 @@ def handle_scan_results():
 
                 # Break if we don't support this sonde type.
                 if _check_type not in VALID_SONDE_TYPES:
-                    logging.error(
+                    logging.warning(
                         "Task Manager - Unsupported sonde type: %s" % _check_type
                     )
                     # TODO - Potentially add the frequency of the unsupported sonde to the temporary block list?
@@ -828,29 +828,29 @@ def main():
         exporter_objects.append(_email_notification)
         exporter_functions.append(_email_notification.add)
 
-    # Habitat Uploader
-    if config["habitat_enabled"]:
+    # Habitat Uploader - DEPRECATED - Sondehub DB now in use (>1.5.0)
+    # if config["habitat_enabled"]:
 
-        if config["habitat_upload_listener_position"] is False:
-            _habitat_station_position = None
-        else:
-            _habitat_station_position = (
-                config["station_lat"],
-                config["station_lon"],
-                config["station_alt"],
-            )
+    #     if config["habitat_upload_listener_position"] is False:
+    #         _habitat_station_position = None
+    #     else:
+    #         _habitat_station_position = (
+    #             config["station_lat"],
+    #             config["station_lon"],
+    #             config["station_alt"],
+    #         )
 
-        _habitat = HabitatUploader(
-            user_callsign=config["habitat_uploader_callsign"],
-            user_antenna=config["habitat_uploader_antenna"],
-            station_position=_habitat_station_position,
-            synchronous_upload_time=config["habitat_upload_rate"],
-            callsign_validity_threshold=config["payload_id_valid"],
-            url=config["habitat_url"],
-        )
+    #     _habitat = HabitatUploader(
+    #         user_callsign=config["habitat_uploader_callsign"],
+    #         user_antenna=config["habitat_uploader_antenna"],
+    #         station_position=_habitat_station_position,
+    #         synchronous_upload_time=config["habitat_upload_rate"],
+    #         callsign_validity_threshold=config["payload_id_valid"],
+    #         url=config["habitat_url"],
+    #     )
 
-        exporter_objects.append(_habitat)
-        exporter_functions.append(_habitat.add)
+    #     exporter_objects.append(_habitat)
+    #     exporter_functions.append(_habitat.add)
 
     # APRS Uploader
     if config["aprs_enabled"]:
@@ -931,6 +931,7 @@ def main():
         exporter_objects.append(_rotator)
         exporter_functions.append(_rotator.add)
 
+    # Sondehub v2 Database
     if config["sondehub_enabled"]:
         if config["habitat_upload_listener_position"] is False:
             _sondehub_station_position = None
