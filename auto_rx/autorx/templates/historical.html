@@ -113,6 +113,7 @@
                 $("#hidesonde-map").prop('disabled', true);
                 $("#showsonde-skew").prop('disabled', true);
                 $("#hidesonde-skew").prop('disabled', true);
+                $("#download-logs").prop('disabled', true);
             }
 
             async function enableMenu () {
@@ -123,6 +124,7 @@
                 $("#hidesonde-map").prop('disabled', false);
                 $("#showsonde-skew").prop('disabled', false);
                 $("#hidesonde-skew").prop('disabled', false);
+                $("#download-logs").prop('disabled', false);
             }
 
             if ((window.innerWidth/window.innerHeight) < 1) {
@@ -138,7 +140,6 @@
                         var sonde_path = L.polyline([]);
                         sonde_path.addLatLng([parseFloat(value['first']['lat']), parseFloat(value['first']['lon'])]);
                         sonde_path.addLatLng([parseFloat(value['last']['lat']), parseFloat(value['last']['lon'])]);
-
                         historicalsonde.addLayer(sonde_path)
 
                         //launch marker
@@ -155,6 +156,14 @@
                             launch_time = value['first']['datetime'];
                         }
 
+                        if (getCookie('imperial') == 'true') {
+                            launch_range = parseFloat(value['first']['range_km'])*0.621371;
+                        } else {
+                            launch_range = parseFloat(value['first']['range_km']);
+                        }
+
+                        launch_bearing = Math.floor(parseFloat(value['first']['bearing'])) + "˚ True.";
+
                         launch_icon = L.icon({
                             iconUrl: "{{ url_for('static', filename='img/launch_marker.png') }}",
                             iconSize: [15,15],
@@ -162,14 +171,14 @@
                         });
 
                         if (getCookie('imperial') == 'true') {
-                            launchIconTitle = value['serial'] + ' First Observed Position (' + launch_lat + ', ' + launch_lon+ ', ' + Math.floor(launch_alt) + 'ft) <br/>at ' + launch_time;
+                            launchIconTitle = value['serial'] + ' First Observed Position (' + launch_lat + ', ' + launch_lon+ ', ' + Math.floor(launch_alt) + 'ft) <br/>at ' + launch_time + ', ' + Math.floor(launch_range) + ' mi range, ' + launch_bearing;
                         } else {
-                            launchIconTitle = value['serial'] + ' First Observed Position (' + launch_lat + ', ' + launch_lon+ ', ' + Math.floor(launch_alt) + 'm) <br/>at ' + launch_time;
+                            launchIconTitle = value['serial'] + ' First Observed Position (' + launch_lat + ', ' + launch_lon+ ', ' + Math.floor(launch_alt) + 'm) <br/>at ' + launch_time + ', ' + Math.floor(launch_range) + ' km range, ' + launch_bearing;
                         }
 
                         launchMarker = L.marker([launch_lat, launch_lon],
                             {
-                                title:launchIconTitle, 
+                                //title:launchIconTitle, 
                                 icon: launch_icon
                             })
                             .bindTooltip(launchIconTitle,{permanent:false,direction:'right'});
@@ -190,6 +199,14 @@
                             landing_time = value['last']['datetime'];
                         }
 
+                        if (getCookie('imperial') == 'true') {
+                            landing_range = parseFloat(value['last']['range_km'])*0.621371;
+                        } else {
+                            landing_range = parseFloat(value['last']['range_km']);
+                        }
+
+                        landing_bearing = Math.floor(parseFloat(value['last']['bearing'])) + "˚ True.";
+
                         landing_icon = L.icon({
                             iconUrl: "{{ url_for('static', filename='img/landing_marker.png') }}",
                             iconSize: [15,15],
@@ -197,14 +214,14 @@
                         });
 
                         if (getCookie('imperial') == 'true') {
-                            landingIconTitle = value['serial'] + ' Last Observed Position (' + landing_lat + ', ' + landing_lon+ ', ' + Math.floor(landing_alt) + 'ft) <br/>at ' + landing_time;
+                            landingIconTitle = value['serial'] + ' Last Observed Position (' + landing_lat + ', ' + landing_lon+ ', ' + Math.floor(landing_alt) + 'ft) <br/>at ' + landing_time + ', ' + Math.floor(landing_range) + ' mi range, ' + landing_bearing;
                         } else {
-                            landingIconTitle = value['serial'] + ' Last Observed Position (' + landing_lat + ', ' + landing_lon+ ', ' + Math.floor(landing_alt) + 'm) <br/>at ' + landing_time;
+                            landingIconTitle = value['serial'] + ' Last Observed Position (' + landing_lat + ', ' + landing_lon+ ', ' + Math.floor(landing_alt) + 'm) <br/>at ' + landing_time + ', ' + Math.floor(landing_range) + ' km range, ' + landing_bearing;
                         }
 
                         landingMarker = L.marker([landing_lat, landing_lon],
                             {
-                                title:landingIconTitle, 
+                                //title:landingIconTitle, 
                                 icon: landing_icon
                             })
                             .bindTooltip(landingIconTitle,{permanent:false,direction:'right'});
@@ -215,6 +232,10 @@
             }
 
             function showSondeLanding () {
+
+                var layerBounds = new L.LatLngBounds();
+                layerBounds.extend([autorx_config.station_lat, autorx_config.station_lon]);
+
                 table_data.forEach(initialShow);
                 function initialShow(value, index, array) {
                     //landing marker
@@ -231,6 +252,14 @@
                         landing_time = value['last']['datetime'];
                     }
 
+                    if (getCookie('imperial') == 'true') {
+                        landing_range = parseFloat(value['last']['range_km'])*0.621371;
+                    } else {
+                        landing_range = parseFloat(value['last']['range_km']);
+                    }
+
+                    landing_bearing = Math.floor(parseFloat(value['last']['bearing'])) + "˚ True.";
+
                     landing_icon = L.icon({
                         iconUrl: "{{ url_for('static', filename='img/landing_marker.png') }}",
                         iconSize: [15,15],
@@ -238,20 +267,32 @@
                     });
 
                     if (getCookie('imperial') == 'true') {
-                        landingIconTitle = value['serial'] + ' Last Observed Position (' + landing_lat + ', ' + landing_lon+ ', ' + Math.floor(landing_alt) + 'ft) <br/>at ' + landing_time;
+                        landingIconTitle = value['serial'] + ' Last Observed Position (' + landing_lat + ', ' + landing_lon+ ', ' + Math.floor(landing_alt) + 'ft) <br/>at ' + landing_time + ', ' + Math.floor(landing_range) + ' mi range, ' + landing_bearing;
                     } else {
-                        landingIconTitle = value['serial'] + ' Last Observed Position (' + landing_lat + ', ' + landing_lon+ ', ' + Math.floor(landing_alt) + 'm) <br/>at ' + landing_time;
+                        landingIconTitle = value['serial'] + ' Last Observed Position (' + landing_lat + ', ' + landing_lon+ ', ' + Math.floor(landing_alt) + 'm) <br/>at ' + landing_time + ', ' + Math.floor(landing_range) + ' km range, ' + landing_bearing;
                     }
 
                     landingMarker = L.marker([landing_lat, landing_lon],
                         {
-                            title:landingIconTitle, 
+                            title: value['serial'], 
                             icon: landing_icon
                         })
-                        .bindTooltip(landingIconTitle,{permanent:false,direction:'right'});
-
+                        .bindTooltip(landingIconTitle,{permanent:false,direction:'right'})
+                        .on("click", function(e){
+                            // Bump up the size of the landing icon slightly on click.
+                            new_icon = e.sourceTarget.options.icon;
+                            new_icon.options.iconSize = [20, 20];
+                            new_icon.options.iconAnchor= [10,10];
+                            e.sourceTarget.setIcon(new_icon);
+                            // Select the sonde in the table.
+                            table.selectRow(table.getRows().filter(row => row.getData().serial == e.sourceTarget.options.title));
+                        });
+                    
+                    layerBounds.extend([landing_lat, landing_lon]);
                     historicalsonde.addLayer(landingMarker)
                 }
+
+                mymap.fitBounds(layerBounds);
             }
 
             function showSondeMap () {
@@ -285,14 +326,7 @@
                                     }
                                 }
 
-                                //check if exists
-                                for (const [key, value] of Object.entries(historicalsonde['_layers'])) {
-                                    if (String(value['options']['title']).includes(selectedrows[i]['serial'])) {
-                                        fastplot = true;
-                                    }
-                                }
-
-
+                                fastplot = true;
                                 
                                 //launch marker
                                 launch_lat = parseFloat(data['first'][0]);
@@ -308,6 +342,14 @@
                                     launch_time = data['first_time'];
                                 }
 
+                                if (getCookie('imperial') == 'true') {
+                                    launch_range = parseFloat(data['first_range_km'])*0.621371;
+                                } else {
+                                    launch_range = parseFloat(data['first_range_km']);
+                                }
+
+                                launch_bearing = Math.floor(parseFloat(data['first_bearing'])) + "˚ True.";
+
                                 launch_icon = L.icon({
                                     iconUrl: "{{ url_for('static', filename='img/launch_marker.png') }}",
                                     iconSize: [15,15],
@@ -315,14 +357,14 @@
                                 });
 
                                 if (getCookie('imperial') == 'true') {
-                                    launchIconTitle = selectedrows[i]['serial'] + ' First Observed Position (' + launch_lat + ', ' + launch_lon+ ', ' + Math.floor(launch_alt) + 'ft) <br/>at ' + launch_time;
+                                    launchIconTitle = selectedrows[i]['serial'] + ' First Observed Position (' + launch_lat + ', ' + launch_lon+ ', ' + Math.floor(launch_alt) + 'ft) <br/>at ' + launch_time + ', ' + Math.floor(launch_range) + ' mi range, ' + launch_bearing;
                                 } else {
-                                    launchIconTitle = selectedrows[i]['serial'] + ' First Observed Position (' + launch_lat + ', ' + launch_lon+ ', ' + Math.floor(launch_alt) + 'm) <br/>at ' + launch_time;
+                                    launchIconTitle = selectedrows[i]['serial'] + ' First Observed Position (' + launch_lat + ', ' + launch_lon+ ', ' + Math.floor(launch_alt) + 'm) <br/>at ' + launch_time + ', ' + Math.floor(launch_range) + ' km range, ' + launch_bearing;
                                 }
 
                                 launchMarker = L.marker([launch_lat, launch_lon],
                                     {
-                                        title:launchIconTitle, 
+                                        //title:launchIconTitle, 
                                         icon: launch_icon
                                     })
                                     .bindTooltip(launchIconTitle,{permanent:false,direction:'right'});
@@ -346,6 +388,14 @@
                                 } else {
                                     landing_time = data['last_time']
                                 }
+                                
+                                if (getCookie('imperial') == 'true') {
+                                    landing_range = parseFloat(data['last_range_km'])*0.621371;
+                                } else {
+                                    landing_range = parseFloat(data['last_range_km']);
+                                }
+
+                                landing_bearing = Math.floor(parseFloat(data['last_bearing'])) + "˚ True.";
 
                                 landing_icon = L.icon({
                                     iconUrl: "{{ url_for('static', filename='img/landing_marker.png') }}",
@@ -354,14 +404,14 @@
                                 });
 
                                 if (getCookie('imperial') == 'true') {
-                                    landingIconTitle = selectedrows[i]['serial'] + ' Last Observed Position (' + landing_lat + ', ' + landing_lon+ ', ' + Math.floor(landing_alt) + 'ft) <br/>at ' + landing_time;
+                                    landingIconTitle = selectedrows[i]['serial'] + ' Last Observed Position (' + landing_lat + ', ' + landing_lon+ ', ' + Math.floor(landing_alt) + 'ft) <br/>at ' + landing_time + ', ' + Math.floor(landing_range) + ' mi range ' + landing_bearing;
                                 } else {
-                                    landingIconTitle = selectedrows[i]['serial'] + ' Last Observed Position (' + landing_lat + ', ' + landing_lon+ ', ' + Math.floor(landing_alt) + 'm) <br/>at ' + landing_time;
+                                    landingIconTitle = selectedrows[i]['serial'] + ' Last Observed Position (' + landing_lat + ', ' + landing_lon+ ', ' + Math.floor(landing_alt) + 'm) <br/>at ' + landing_time + ', ' + Math.floor(landing_range) + ' km range ' + landing_bearing;
                                 }
 
                                 landingMarker = L.marker([landing_lat, landing_lon],
                                     {
-                                        title:landingIconTitle, 
+                                        //title:landingIconTitle, 
                                         icon: landing_icon
                                     })
                                     .bindTooltip(landingIconTitle,{permanent:false,direction:'right'});
@@ -488,9 +538,12 @@
 
             function showSkewT () {
                 selectedrows = table.getSelectedData();
-                // TODO: Get this decimation value from some kind of user input (slider?)
-                // Reasonable values are 1 through 100, with a default of 25.
-                decimation = 25;
+                if ((getCookie("skewt-decimation") != null) && ($("#skewt-buttons").css("visibility") != "visible")) {
+                    decimation = getCookie("skewt-decimation");
+                } else {
+                    decimation = parseInt($("#skewt-decimation").val());
+                    setCookie("skewt-decimation", decimation);
+                }
                 if (selectedrows.length > 0) {
                     _serial = selectedrows[selectedrows.length-1]['serial'];
                     _type = selectedrows[selectedrows.length-1]['type'];
@@ -522,6 +575,16 @@
 
                             try {
                                 skewt.plot(data.skewt);
+                                $("#skewt-buttons").css('visibility', 'visible');
+                                var slider = document.getElementById("skewt-decimation");
+                                var output = document.getElementById("skewt-decimation-value");
+                                slider.value = decimation;
+                                output.innerHTML = slider.value; // Display the default slider value
+
+                                // Update the current slider value (each time you drag the slider handle)
+                                slider.oninput = function() {
+                                    output.innerHTML = this.value;
+                                }
                                 enableMenu();
                                 if (document.getElementById("mySettings").style.width == "0px" || document.getElementById("mySettings").style.width == 0) {
                                     if ((window.innerWidth/window.innerHeight) > 1) {
@@ -550,14 +613,44 @@
                 disableMenu();
                 showSkewT();
             });
-
-            $("#hidesonde-skew").click(function(){
+            $("#regenerate-skewt").click(function(){
                 disableMenu();
-                $('#skewt-header').html("<h2>Skew-T</h2>");
-                try {
-                    skewt.clear();
-                } catch (err) {}
-                enableMenu();
+                showSkewT();
+            });
+
+            function downloadLogs() {
+                // Download a set of log files.
+                selectedrows = table.getSelectedData();
+                if (selectedrows.length > 0) {
+                    // Create the list of log files.
+                    _serial_list = [];
+                    for (let i = 0; i < selectedrows.length; i++){
+                        _serial_list.push(selectedrows[i]['serial']);
+                    }
+
+                    if(_serial_list.length>50){
+                        if (confirm("Warning - downloading lots of log may take some time. Are you sure?")) {
+                            // Just continue on.
+                        } else {
+                            return;
+                        }
+                    }
+
+                    if(_serial_list.length == table.getData().length){
+                        // Request all log files
+                        window.open("/export_all_log_files" , '_blank');
+                    }else {
+                        // Just request the selected ones.
+                        // Convert the list to JSON, and then to base64
+                        b64 = btoa(JSON.stringify(_serial_list));
+                        // Make the request in a new tab
+                        window.open("/export_log_files/"+b64 , '_blank');
+                    }
+                }
+            }
+
+            $("#download-logs").click(function(){
+                downloadLogs();
             });
             
             // List of available map layers.
@@ -817,16 +910,15 @@
         <div id="mySidenav" class="sidenav">
             <div class="headerdiv">
             <a href="javascript:void(0)" class="closebtn" id="closebtn" onclick="changeNav()">&#10006;</a>
-            <img src="{{ url_for('static', filename='img/autorx_logo.png') }}" alt="Radiosonde Auto-RX Button">
             <h2>Sonde List</h2>
             <div style="width:100%;text-align:center;">
                 <button id="select-all" style="margin:3px auto">Select All</button>
                 <button id="deselect-all" style="margin:3px auto">Deselect All</button>
+                <button id="hidesonde-map" style="margin:3px auto">Reset Map</button>
                 <button id="showsonde-map" style="margin:3px auto">Plot Paths</button>
                 <button id="showsonde-mapquick" style="margin:3px auto">Plot Landings</button>
-                <button id="hidesonde-map" style="margin:3px auto">Reset Map</button>
                 <button id="showsonde-skew" style="margin:3px auto">Plot Skew-T</button>
-                <button id="hidesonde-skew" style="margin:3px auto">Remove Skew-T</button>
+                <button id="download-logs" style="margin:3px auto">Download Logs</button>
             </div>
             <br>
             </div>
@@ -838,6 +930,18 @@
         <a href="javascript:void(0)" class="closebtn2" id="closebtn2" onclick="changeSettings()">&#10006;</a>
         <h2 id="skewt-header" style="width:100%;text-align:center;">Skew-T Plot</h2>
         <div id="skewt" style="width:90%;margin:3px auto"></div>
+        <span id="skewt-buttons", style="width:100%;text-align:center;visibility:hidden;vertical-align:middle;">
+            Decimation:
+            <input style="vertical-align:middle;" type="range" min="1" max="100" value="25" class="slider" id="skewt-decimation" list="my-detents">
+            <datalist id="my-detents">
+                <option value="5">
+                <option value="10">
+                <option value="25">
+                <option value="50">
+            </datalist>
+            <span style="width:30px;display:inline-block;" id="skewt-decimation-value"></span>
+            <button id="regenerate-skewt" style="margin:3px auto;vertical-align:middle;">Regenerate</button>
+        </span>
         <div id="skewt-footer"></div>
     </div>
 

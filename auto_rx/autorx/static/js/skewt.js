@@ -10,7 +10,7 @@ var SkewT = function(div) {
 	//properties used in calculations
 	var wrapper = d3.select(div);
 	// These width and height values get used when the plot is first shown
-	var width = parseInt(wrapper.style('width'), 10)-100;
+	var width = parseInt(wrapper.style('width'), 10)-50;
 	var height = width;//parseInt(wrapper.style('height'), 10)-100; // width; //tofix
 	var margin = {top: 30, right: 40, bottom: 20, left: 35}; //container margins
 	var deg2rad = (Math.PI/180);
@@ -39,7 +39,7 @@ var SkewT = function(div) {
 	//local functions	
 	function setVariables() {
 		// These width and height values get calculated when the plot is updated
-		width = parseInt(wrapper.style('width'), 10) - 10; // tofix: using -10 to prevent x overflow
+		width = parseInt(wrapper.style('width'), 10) - 50; // tofix: using -10 to prevent x overflow
 		height = width; //to fix
 		w = width - margin.left - margin.right;
 		h = width - margin.top - margin.bottom;		
@@ -236,9 +236,13 @@ var SkewT = function(div) {
 		if(data.length==0) return;
 
 		//skew-t stuff
-		var skewtline = data.filter(function(d) { return (d.temp > -1000 && d.dwpt > -800); });
+		var skewtline = data.filter(function(d) { return (d.temp > -1000 && d.dwpt > -1000); });
+		// Separate filter for dewpoint data.
+		var skewtline_dewp = data.filter(function(d) { return (d.temp > -1000 && d.dwpt > -800); });
 		var skewtlines = [];
+		var skewtlines_dewp = [];
 		skewtlines.push(skewtline);
+		skewtlines_dewp.push(skewtline_dewp);
 		
 		var templine = d3.svg.line().interpolate("linear").x(function(d,i) { return x(d.temp) + (y(basep)-y(d.press))/tan; }).y(function(d,i) { return y(d.press); });
 		var tempLines = skewtgroup.selectAll("templines")
@@ -249,7 +253,7 @@ var SkewT = function(div) {
 
 		var tempdewline = d3.svg.line().interpolate("linear").x(function(d,i) { return x(d.dwpt) + (y(basep)-y(d.press))/tan; }).y(function(d,i) { return y(d.press); });
 		var tempDewlines = skewtgroup.selectAll("tempdewlines")
-			.data(skewtlines).enter().append("path")
+			.data(skewtlines_dewp).enter().append("path")
 			.attr("class", function(d,i) { return (i<10) ? "dwpt skline" : "dwpt mean" })
 			.attr("clip-path", "url(#clipper)")
 			.attr("d", tempdewline);
