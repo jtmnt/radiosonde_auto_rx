@@ -535,8 +535,9 @@ class SondeDecoder(object):
             # - Have dropped the low-leakage FIR filter (-F9) to save a bit of CPU
             # Have scaled back sample rate to 220 kHz to again save CPU.
             # mk2mod runs at ~90% CPU on a RPi 3, with rtl_fm using ~50% of another core.
+            # Update 2021-07-24: Updated version with speedups now taking 240 kHz BW and only using 50% of a core.
 
-            decode_cmd = "%s %s-p %d -d %s %s-M raw -s 220k -f %d 2>/dev/null |" % (
+            decode_cmd = "%s %s-p %d -d %s %s-M raw -s 240k -f %d 2>/dev/null |" % (
                 self.sdr_fm,
                 bias_option,
                 int(self.ppm),
@@ -550,7 +551,7 @@ class SondeDecoder(object):
                 decode_cmd += " tee decode_IQ_%s.bin |" % str(self.device_idx)
 
             # LMS6-1680 decoder
-            decode_cmd += f"./mk2mod --iq 0.0 --lpIQ --lpbw 160 --lpFM --dc --crc --json {self.raw_file_option} - 220000 16 2>/dev/null"
+            decode_cmd += f"./mk2mod --iq 0.0 --lpIQ --lpbw 160 --decFM --dc --crc --json {self.raw_file_option} - 240000 16 2>/dev/null"
             # Settings for old decoder, which cares about FM inversion.
             # if self.inverted:
             #     self.log_debug("Using inverted MK2A decoder.")
@@ -1326,7 +1327,13 @@ class SondeDecoder(object):
 
             # Try and generate an APRS callsign for this sonde.
             # Doing this calculation here allows us to pass it to the web interface to generate an appropriate link
-            _telemetry["aprsid"] = generate_aprs_id(_telemetry)
+            try:
+                _telemetry["aprsid"] = generate_aprs_id(_telemetry)
+            except Exception as e:
+                self.log_debug(
+                    f"Couldn't generate APRS ID for {_telemetry['id']}"
+                )
+                _telemetry["aprsid"] = None
 
             # If we have been provided a telemetry filter function, pass the telemetry data
             # through the filter, and return the response
@@ -1347,6 +1354,7 @@ class SondeDecoder(object):
                 self.exit_state = "TempBlock"
                 self.decoder_running = False
                 return False
+
 
             # If the telemetry is OK, send to the exporter functions (if we have any).
             if self.exporters is None:
