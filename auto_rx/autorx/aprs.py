@@ -760,7 +760,7 @@ class APRSUploader(object):
             elif float(telemetry['alt']) > 10000:
                 self.synchronous_upload_time = 60
             else:
-                self.synchronous_upload_time = 30
+                self.synchronous_upload_time = 60
             self.input_queue.put(telemetry)
         else:
             self.log_error("Processing not running, discarding.")
