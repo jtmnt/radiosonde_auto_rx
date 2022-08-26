@@ -750,10 +750,12 @@ class APRSUploader(object):
 
         # Add it to the queue if we are running.
         if self.input_processing_running:
-            if float(telemetry['vel_v']) < -1 and float(telemetry['alt']) < 500:
+            if float(telemetry['vel_v']) < -1 and float(telemetry['alt']) < 1000:
                 self.upload_time = 5
-            elif float(telemetry['vel_v']) < -1 and float(telemetry['alt']) < 1000:
+                self.next_upload = time.monotonic() + self.upload_time
+            elif float(telemetry['vel_v']) < -1 and float(telemetry['alt']) < 1500:
                 self.upload_time = 10
+                self.next_upload = time.monotonic() + self.upload_time
             elif float(telemetry['alt']) > 10000:
                 self.upload_time = 60
             else:
