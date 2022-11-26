@@ -291,6 +291,28 @@ def handle_scan_results():
                 continue
             else:
 
+                # Handle an inverted sonde detection.
+                if _type.startswith("-"):
+                    _inverted = " (Inverted)"
+                    _check_type = _type[1:]
+                else:
+                    _check_type = _type
+                    _inverted = ""
+
+                # Note: We don't indicate if it's been detected as inverted here.
+                logging.info(
+                    "Task Manager - Detected new %s sonde on %.3f MHz!"
+                    % (_check_type, _freq / 1e6)
+                )
+
+                # Break if we don't support this sonde type.
+                if _check_type not in VALID_SONDE_TYPES:
+                    logging.warning(
+                        "Task Manager - Unsupported sonde type: %s" % _check_type
+                    )
+                    # TODO - Potentially add the frequency of the unsupported sonde to the temporary block list?
+                    continue
+
                 # Check that we are not attempting to start a decoder too close to an existing decoder for known 'drifty' radiosonde types.
                 # 'Too close' is defined by the 'decoder_spacing_limit' advanced coniguration option.
                 _too_close = False
@@ -300,10 +322,14 @@ def handle_scan_results():
                     if (type(_key) == int) or (type(_key) == float):
                         # Extract the currently decoded sonde type from the currently running decoder.
                         _decoding_sonde_type = autorx.task_list[_key]["task"].sonde_type
+                        
+                        # Remove any inverted decoder information for the comparison.
+                        if _decoding_sonde_type.startswith("-"):
+                            _decoding_sonde_type = _decoding_sonde_type[1:]
 
                         # Only check the frequency spacing if we have a known 'drifty' sonde type, *and* the new sonde type is of the same type.
                         if (_decoding_sonde_type in DRIFTY_SONDE_TYPES) and (
-                            _decoding_sonde_type == _type
+                            _decoding_sonde_type == _check_type
                         ):
                             if abs(_key - _freq) < config["decoder_spacing_limit"]:
                                 # At this point, we can be pretty sure that there is another decoder already decoding this particular sonde ID.
@@ -342,27 +368,6 @@ def handle_scan_results():
                         )
                         temporary_block_list.pop(_freq)
 
-                # Handle an inverted sonde detection.
-                if _type.startswith("-"):
-                    _inverted = " (Inverted)"
-                    _check_type = _type[1:]
-                else:
-                    _check_type = _type
-                    _inverted = ""
-
-                # Note: We don't indicate if it's been detected as inverted here.
-                logging.info(
-                    "Task Manager - Detected new %s sonde on %.3f MHz!"
-                    % (_check_type, _freq / 1e6)
-                )
-
-                # Break if we don't support this sonde type.
-                if _check_type not in VALID_SONDE_TYPES:
-                    logging.warning(
-                        "Task Manager - Unsupported sonde type: %s" % _check_type
-                    )
-                    # TODO - Potentially add the frequency of the unsupported sonde to the temporary block list?
-                    continue
 
                 if allocate_sdr(check_only=True) is not None:
                     # There is a SDR free! Start the decoder on that SDR
@@ -624,7 +629,7 @@ def telemetry_filter(telemetry):
     else:
         mrz_callsign_valid = False
 
-    # If Vaisala or DFMs, check the callsigns are valid. If M10, iMet or LMS6, just pass it through - we get callsigns immediately and reliably from these.
+    # If Vaisala or DFMs, check the callsigns are valid. If M10/M20, iMet, MTS01 or LMS6, just pass it through - we get callsigns immediately and reliably from these.
     if (
         vaisala_callsign_valid
         or dfm_callsign_valid
@@ -634,6 +639,7 @@ def telemetry_filter(telemetry):
         or ("M20" in telemetry["type"])
         or ("LMS" in telemetry["type"])
         or ("IMET" in telemetry["type"])
+        or ("MTS01" in telemetry["type"])
     ):
         return "OK"
     else:
@@ -767,6 +773,8 @@ def main():
     _log_suffix = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S_system.log")
     _log_path = os.path.join(logging_path, _log_suffix)
 
+    system_log_enabled = False
+
     if args.systemlog:
         # Only write out a logs to a system log file if we have been asked to.
         # Systemd will capture and logrotate our logs anyway, so writing to our own log file is less useful.
@@ -781,6 +789,7 @@ def main():
         stdout_handler = logging.StreamHandler(sys.stdout)
         stdout_handler.setFormatter(stdout_format)
         logging.getLogger().addHandler(stdout_handler)
+        system_log_enabled = True
     else:
         # Otherwise, we only need the stdout logger, which if we don't specify a filename to logging.basicConfig,
         # is the default...
@@ -788,9 +797,6 @@ def main():
             format="%(asctime)s %(levelname)s:%(message)s", level=logging_level
         )
 
-    # Add the web interface logging handler.
-    web_handler = WebHandler()
-    logging.getLogger().addHandler(web_handler)
 
     # Set the requests/socketio loggers (and related) to only display critical log messages.
     logging.getLogger("requests").setLevel(logging.CRITICAL)
@@ -809,6 +815,34 @@ def main():
     else:
         config = _temp_cfg
         autorx.sdr_list = config["sdr_settings"]
+
+    # Apply any logging changes based on configuration file settings.
+    if config["save_system_log"]:
+        # Enable system logging.
+        if system_log_enabled == False:
+            # Clear all existing handlers, and add new ones.
+            logging.basicConfig(
+                format="%(asctime)s %(levelname)s:%(message)s",
+                filename=_log_path,
+                level=logging_level,
+                force=True # This removes all existing handlers before adding new ones.
+            )
+            # Also add a separate stdout logger.
+            stdout_format = logging.Formatter("%(asctime)s %(levelname)s:%(message)s")
+            stdout_handler = logging.StreamHandler(sys.stdout)
+            stdout_handler.setFormatter(stdout_format)
+            logging.getLogger().addHandler(stdout_handler)
+            system_log_enabled = True
+            logging.info("Opened new system log file: %s" % _log_path)
+
+    if config["enable_debug_logging"]:
+        # Set log level to logging.DEBUG
+        logging.getLogger().setLevel(logging.DEBUG)
+        logging.debug("Log level set to DEBUG based on configuration file setting.")
+
+    # Add the web interface logging handler.
+    web_handler = WebHandler()
+    logging.getLogger().addHandler(web_handler)
 
     # Check all the RS utilities exist.
     if not check_rs_utils():

@@ -40,7 +40,8 @@ REQUIRED_RS_UTILS = [
     "imet54mod",
     "mp3h1mod",
     "m20mod",
-    "imet4iq"
+    "imet4iq",
+    "mts01mod"
 ]
 
 
@@ -140,7 +141,7 @@ def strip_sonde_serial(serial):
     """ Strip off any leading sonde type that may be present in a serial number """
 
     # Look for serials with prefixes matching the following known sonde types.
-    _re = re.compile("^(DFM|M10|M20|IMET|IMET5|IMET54|MRZ|LMS6)-")
+    _re = re.compile("^(DFM|M10|M20|IMET|IMET5|IMET54|MRZ|LMS6|IMS100|RS11G|MTS01)-")
 
     # If we have a match, return the trailing part of the serial, re-adding
     # any - separators if they exist.
@@ -182,6 +183,8 @@ def short_type_lookup(type_name):
         return "Meisei iMS-100/RS-11"
     elif type_name == "MRZ":
         return "Meteo-Radiy MRZ"
+    elif type_name == "MTS01":
+        return "Meteosis MTS01"
     else:
         return "Unknown"
 
@@ -216,6 +219,8 @@ def short_short_type_lookup(type_name):
         return "iMS-100"
     elif type_name == "MRZ":
         return "MRZ"
+    elif type_name == "MTS01":
+        return "MTS01"
     else:
         return "Unknown"
 
@@ -290,6 +295,18 @@ def generate_aprs_id(sonde_data):
             if len(_id_hex) > 6:
                 _id_hex = _id_hex[-6:]
             _object_name = "MRZ" + _id_hex.upper()
+
+        elif "MTS01" in sonde_data["type"]:
+            # Split out just the serial number part of the ID, and cast it to an int
+            # This acts as another check that we have been provided with a numeric serial.
+            _mts_id = int(sonde_data["id"].split("-")[-1])
+
+            # Convert to upper-case hex, and take the last 6 nibbles.
+            _id_suffix = hex(_mts_id).upper()[-6:]
+
+            # Create the object name
+            _object_name = "MTS" + _id_suffix
+
 
         # New Sonde types will be added in here.
         else:

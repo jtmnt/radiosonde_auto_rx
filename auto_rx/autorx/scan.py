@@ -23,7 +23,7 @@ from .utils import (
     reset_all_rtlsdrs,
     peak_decimation,
 )
-from .sdr_wrappers import *
+from .sdr_wrappers import test_sdr, reset_sdr, get_sdr_name, get_sdr_iq_cmd, get_sdr_fm_cmd, get_power_spectrum
 
 
 try:
@@ -345,7 +345,7 @@ def detect_sonde(
         # )
         # Saving of Debug audio, if enabled,
         if save_detection_audio:
-            rx_test_command += "tee detect_%s.raw | " % str(device_idx)
+            rx_test_command += "tee detect_%s.raw | " % str(rtl_device_idx)
 
         rx_test_command += os.path.join(
             rs_path, "dft_detect"
@@ -399,7 +399,7 @@ def detect_sonde(
 
         # Saving of Debug audio, if enabled,
         if save_detection_audio:
-            rx_test_command += "tee detect_%s.wav | " % str(device_idx)
+            rx_test_command += "tee detect_%s.wav | " % str(rtl_device_idx)
 
         # Sample decoding / detection
         # Note that we detect for dwell_time seconds, and timeout after dwell_time*2, to catch if no samples are being passed through.
@@ -583,6 +583,18 @@ def detect_sonde(
             _sonde_type = "-MEISEI"
         else:
             _sonde_type = "MEISEI"
+
+    elif "MTS01" in _type:
+        logging.debug(
+            "Scanner (%s) - Detected a Meteosis MTS01 Sonde! (Score: %.2f, Offset: %.1f Hz)"
+            % (_sdr_name, _score, _offset_est)
+        )
+        # Not currently sure if we expect to see inverted Meteosis sondes.
+        if _score < 0:
+            _sonde_type = "-MTS01"
+        else:
+            _sonde_type = "MTS01"
+
     else:
         _sonde_type = None
 

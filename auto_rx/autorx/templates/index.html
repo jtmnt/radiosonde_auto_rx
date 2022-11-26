@@ -105,11 +105,12 @@
                 // Check if time is UTC mode.
                 if (getCookie('UTC') == 'false') {
                     // Check if entry is important.
+                    var log_time_converted = log_time.toLocaleString(window.navigator.language,{hourCycle:'h23', year:"numeric", month:"2-digit", day:'2-digit', hour:'2-digit',minute:'2-digit', second:'2-digit'});
                     if (msg.level == "INFO") {
-                        var log_entry = "<tr><td>" + log_time.toLocaleString("en-AU") + " – " + msg.level + "<br><em style='font-size: 15px;'>" + msg.msg + "</em></td></tr>";
+                        var log_entry = "<tr><td>" + log_time_converted + " – " + msg.level + "<br><em style='font-size: 15px;'>" + msg.msg + "</em></td></tr>";
                     } else {
                         // If entry is important colour text red.
-                        var log_entry = "<tr><td>" + log_time.toLocaleString("en-AU") + " – " + msg.level + "<br><em style='font-size: 15px; color:red;'>" + msg.msg + "</em></td></tr>"
+                        var log_entry = "<tr><td>" + log_time_converted + " – " + msg.level + "<br><em style='font-size: 15px; color:red;'>" + msg.msg + "</em></td></tr>"
                         if (msg.level == "ERROR" || msg.level == "CRITICAL") {
                             if (document.getElementById("mySidenav").offsetWidth == 0) {
                                 $('#log-tray').css('color', 'red');
@@ -168,7 +169,8 @@
                         temp_date = temp_date.slice(0, -3);
                         temp_date += "Z";
                         var date = new Date(temp_date);
-                        $('#scan_results').html('<b>Latest Scan:</b> ' + date.toLocaleString("en-AU"));
+                        var date_converted = date.toLocaleString(window.navigator.language,{hourCycle:'h23', year:"numeric", month:"2-digit", day:'2-digit', hour:'2-digit',minute:'2-digit', second:'2-digit'});
+                        $('#scan_results').html('<b>Latest Scan:</b> ' + date_converted);
                     } else {
                         $('#scan_results').html('<b>Latest Scan:</b> ' + (data.timestamp.slice(0, -3) + 'Z').replace("T", " ").replace("Z", "").slice(0, -4) + ' UTC');
                     }
@@ -501,11 +503,12 @@
                     {title:"Time", field:"datetime", width:180, headerSort:true, formatter:function(cell, formatterParams, onRendered){
                         if (getCookie('UTC') == 'false') {
                             var temp_time = new Date(cell.getValue());
-                            if (temp_time.toLocaleString("en-AU") == "Invalid Date") {
+                            var temp_converted = temp_time.toLocaleString(window.navigator.language,{hourCycle:'h23', year:"numeric", month:"2-digit", day:'2-digit', hour:'2-digit',minute:'2-digit', second:'2-digit'});
+                            if (temp_converted == "Invalid Date") {                    
                                 return;
                             } else {
-                                return temp_time.toLocaleString("en-AU");
-                            }
+                                return temp_converted;
+                            }                            
                         } else {
                             return cell.getValue();
                         }
@@ -653,6 +656,12 @@
                         if (sonde_id_age>(1000*autorx_config.rx_timeout)){
                             sonde_id_data.sdr_device_idx = "";
                             sonde_id_data.age = "old";
+                            // Remove the LOS line
+                            if(sonde_positions[sonde_id].hasOwnProperty("los_path")){
+                                sonde_positions[sonde_id].los_path.remove();
+                                delete sonde_positions[sonde_id].los_path;
+                            }
+
                         }else{
                             sonde_id_data.age = (sonde_id_age/1000.0).toFixed(0) + " s";
                         }
@@ -767,14 +776,14 @@
                             .bindTooltip('<div class="tooltip-container">' + sonde_id + '<div class="tooltip-container" style="color: #005ec1;">' + _alt +  _vel_v +  _vel_h + '</div></div>',{permanent:false, direction:'right', className: 'sondeTooltip', offset: [10,0], interactive: false, opacity: 0.7 })
                             .addTo(mymap);
 
-                        if(autorx_config.station_lat != 0.0){
-                            sonde_positions[sonde_id].los_path = L.polyline([],
-                                {
-                                    color:los_color,
-                                    opacity:los_opacity
-                                }
-                            ).addTo(mymap);
-                        }
+                        // if(autorx_config.station_lat != 0.0){
+                        //     sonde_positions[sonde_id].los_path = L.polyline([],
+                        //         {
+                        //             color:los_color,
+                        //             opacity:los_opacity
+                        //         }
+                        //     ).addTo(mymap);
+                        // }
 
                         if (telem.vel_v < 0){
                             sonde_positions[sonde_id].marker.setIcon(sondeDescentIcons[sonde_positions[sonde_id].colour]);
@@ -885,7 +894,16 @@
                     }
 
                     if(autorx_config.station_lat != 0.0){
-                        sonde_positions[msg.id].los_path.setLatLngs([[autorx_config.station_lat, autorx_config.station_lon],[msg.lat, msg.lon]]);
+                        if(sonde_positions[msg.id].hasOwnProperty("los_path")){
+                            sonde_positions[msg.id].los_path.setLatLngs([[autorx_config.station_lat, autorx_config.station_lon],[msg.lat, msg.lon]]);
+                        } else {
+                            sonde_positions[msg.id].los_path = L.polyline([[autorx_config.station_lat, autorx_config.station_lon],[msg.lat, msg.lon]],
+                            {
+                                color:los_color,
+                                opacity:los_opacity
+                            }
+                            ).addTo(mymap);
+                        }
                     }
                 }
 

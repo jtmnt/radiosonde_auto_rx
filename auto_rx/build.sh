@@ -36,5 +36,6 @@ mv ../demod/mod/lms6Xmod .
 mv ../demod/mod/meisei100mod .
 mv ../demod/mod/imet54mod .
 mv ../demod/mod/mp3h1mod .
+mv ../demod/mod/mts01mod .
 
 echo "Done!"

@@ -163,6 +163,8 @@ def read_auto_rx_config(filename, no_sdr_test=False):
         "save_decode_audio": False,
         "save_decode_iq": False,
         "save_raw_hex": False,
+        "save_system_log": False,
+        "enable_debug_logging": False,
         # URL for the Habitat DB Server.
         # As of July 2018 we send via sondehub.org, which will allow us to eventually transition away
         # from using the habhub.org tracker, and leave it for use by High-Altitude Balloon Hobbyists.
@@ -450,7 +452,8 @@ def read_auto_rx_config(filename, no_sdr_test=False):
             "IMET5": True,
             "LMS6": True,
             "MK2LMS": False,
-            "MEISEI": False,
+            "MEISEI": True,
+            "MTS01": False, # Until we test it
             "MRZ": False,  # .... except for the MRZ, until we know it works.
             "UDP": False,
         }
@@ -697,19 +700,21 @@ def read_auto_rx_config(filename, no_sdr_test=False):
 
 
         # 1.6.0 - New SDR options
-        try:
+        if not config.has_option("sdr", "sdr_type"):
+            logging.warning(
+                "Config - Missing sdr_type configuration option, defaulting to RTLSDR."
+            )
+            auto_rx_config["sdr_type"] = "RTLSDR"
+        else:
             auto_rx_config["sdr_type"] = config.get("sdr", "sdr_type")
+
+        try:
             auto_rx_config["sdr_hostname"] = config.get("sdr", "sdr_hostname")
             auto_rx_config["sdr_port"] = config.getint("sdr", "sdr_port")
             auto_rx_config["ss_iq_path"] = config.get("advanced", "ss_iq_path")
             auto_rx_config["ss_power_path"] = config.get("advanced", "ss_power_path")
         except:
-            # Switch this to warning on release...
-            logging.debug(
-                "Config - Did not find new sdr_type and associated options, defaulting to RTLSDR operation."
-            )
-            auto_rx_config["sdr_type"] = "RTLSDR"
-
+            logging.debug("Config - Did not find new sdr_type associated options.")
 
         try:
             auto_rx_config["always_decode"] = json.loads(
@@ -727,9 +732,21 @@ def read_auto_rx_config(filename, no_sdr_test=False):
             )
         except:
             logging.warning(
-                "Config - Did not find meisei_experimental setting, using default (disabled)"
+                "Config - Did not find meisei_experimental setting, using default (enabled)"
             )
-            auto_rx_config["experimental_decoders"]["MEISEI"] = False
+            auto_rx_config["experimental_decoders"]["MEISEI"] = True
+
+        try:
+            auto_rx_config["save_system_log"] = config.getboolean(
+                "logging", "save_system_log"
+            )
+            auto_rx_config["enable_debug_logging"] = config.getboolean(
+                "logging", "enable_debug_logging"
+            )
+        except:
+            logging.warning(
+                "Config - Did not find system / debug logging options, using defaults (disabled, unless set as a command-line option.)"
+            )
 
 
         # If we are being called as part of a unit test, just return the config now.
