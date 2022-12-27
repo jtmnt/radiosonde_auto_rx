@@ -41,7 +41,8 @@ REQUIRED_RS_UTILS = [
     "mp3h1mod",
     "m20mod",
     "imet4iq",
-    "mts01mod"
+    "mts01mod",
+    "iq_dec"
 ]
 
 
@@ -181,6 +182,10 @@ def short_type_lookup(type_name):
         return "Intermet Systems iMet-5x"
     elif type_name == "MEISEI":
         return "Meisei iMS-100/RS-11"
+    elif type_name == "IMS100":
+        return "Meisei iMS-100"
+    elif type_name == "RS11G":
+        return "Meisei RS-11G"
     elif type_name == "MRZ":
         return "Meteo-Radiy MRZ"
     elif type_name == "MTS01":
@@ -217,6 +222,10 @@ def short_short_type_lookup(type_name):
         return "iMet-5x"
     elif type_name == "MEISEI":
         return "iMS-100"
+    elif type_name == "IMS100":
+        return "iMS-100"
+    elif type_name == "RS11G":
+        return "RS-11G"
     elif type_name == "MRZ":
         return "MRZ"
     elif type_name == "MTS01":
@@ -276,7 +285,7 @@ def generate_aprs_id(sonde_data):
             _id_hex = hex(_id_suffix).upper()
             _object_name = "LMS6" + _id_hex[-5:]
 
-        elif "MEISEI" in sonde_data["type"]:
+        elif "MEISEI" in sonde_data["type"] or "IMS100" in telemetry["type"] or "RS11G" in telemetry["type"]:
             # Convert the serial number to an int
             _meisei_id = int(sonde_data["id"].split("-")[-1])
             _id_suffix = hex(_meisei_id).upper().split("0X")[1]
