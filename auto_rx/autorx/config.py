@@ -683,8 +683,8 @@ def read_auto_rx_config(filename, no_sdr_test=False):
         # that this goes against the wishes of the radiosonde_auto_rx developers to not be part
         # of the bigger problem of APRS-IS congestion. 
 
-        ALLOWED_APRS_SERVERS = ["radiosondy.info", "localhost"]
-        ALLOWED_APRS_PORTS = [14590]
+        ALLOWED_APRS_SERVERS = ["radiosondy.info", "wettersonde.net", "localhost"]
+        ALLOWED_APRS_PORTS = [14580, 14590]
 
         if auto_rx_config["aprs_server"] not in ALLOWED_APRS_SERVERS:
             logging.warning(
@@ -883,7 +883,7 @@ def read_auto_rx_config(filename, no_sdr_test=False):
         if len(auto_rx_config["sdr_settings"].keys()) == 0:
             # We have no SDRs to use!!
             logging.error("Config - No working SDRs! Cannot run...")
-            return None
+            raise SystemError("No working SDRs!")
         else:
             # Create a global copy of the configuration file at this point
             global_config = copy.deepcopy(auto_rx_config)
@@ -902,7 +902,8 @@ def read_auto_rx_config(filename, no_sdr_test=False):
             web_password = auto_rx_config["web_password"]
 
             return auto_rx_config
-
+    except SystemError as e:
+        raise e
     except:
         traceback.print_exc()
         logging.error("Could not parse config file.")
