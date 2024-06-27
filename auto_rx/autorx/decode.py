@@ -40,7 +40,8 @@ VALID_SONDE_TYPES = [
     "MRZ",
     "MTS01",
     "UDP",
-    "WXR301"
+    "WXR301",
+    "WXRPN9"
 ]
 
 # Known 'Drifty' Radiosonde types
@@ -120,7 +121,8 @@ class SondeDecoder(object):
         "MRZ",
         "MTS01",
         "UDP",
-        "WXR301"
+        "WXR301",
+        "WXRPN9"
     ]
 
     def __init__(
@@ -762,7 +764,31 @@ class SondeDecoder(object):
             # WXR301, via iq_dec as a FM Demod.
             decode_cmd += f"./iq_dec --FM --IFbw {_if_bw} --lpFM --wav --iq 0.0 - {_sample_rate} 16 2>/dev/null | ./weathex301d -b --json"
 
+        elif self.sonde_type == "WXRPN9":
+            # Weathex WxR-301D (PN9)
+            
+            _sample_rate = 96000
+            _if_bw = 64
 
+            decode_cmd = get_sdr_iq_cmd(
+                sdr_type = self.sdr_type,
+                frequency = self.sonde_freq,
+                sample_rate = _sample_rate,
+                sdr_hostname = self.sdr_hostname,
+                sdr_port = self.sdr_port,
+                ss_iq_path = self.ss_iq_path,
+                rtl_device_idx = self.rtl_device_idx,
+                ppm = self.ppm,
+                gain = self.gain,
+                bias = self.bias
+            )
+
+            # Add in tee command to save IQ to disk if debugging is enabled.
+            if self.save_decode_iq:
+                decode_cmd += f" tee {self.save_decode_iq_path} |"
+
+            # WXR301, via iq_dec as a FM Demod.
+            decode_cmd += f"./iq_dec --FM --IFbw {_if_bw} --lpFM --wav --iq 0.0 - {_sample_rate} 16 2>/dev/null | ./weathex301d -b --json --pn9"
 
         elif self.sonde_type == "UDP":
             # UDP Input Mode.
@@ -951,7 +977,8 @@ class SondeDecoder(object):
             if self.save_decode_iq:
                 demod_cmd += f" tee {self.save_decode_iq_path} |"
 
-            demod_cmd += "./fsk_demod --cs16 -b %d -u %d -s --stats=%d 2 %d %d - -" % (
+            # NOTE - Using inverted soft decision outputs, so DFM type detection works correctly.
+            demod_cmd += "./fsk_demod --cs16 -b %d -u %d -s -i --stats=%d 2 %d %d - -" % (
                 _lower,
                 _upper,
                 _stats_rate,
@@ -965,7 +992,7 @@ class SondeDecoder(object):
                 self.raw_file_option = "--rawecc"
 
             decode_cmd = (
-                f"./dfm09mod -vv --ecc --json --dist --auto --softin -i {self.raw_file_option} 2>/dev/null"
+                f"./dfm09mod -vv --ecc --json --dist --auto --softin {self.raw_file_option} 2>/dev/null"
             )
 
             # DFM sondes transmit continuously - average over the last 2 frames, and peak hold
@@ -1308,6 +1335,50 @@ class SondeDecoder(object):
 
             # Soft-decision decoding, inverted.
             decode_cmd = f"./weathex301d --softin -i --json 2>/dev/null"
+
+            # Weathex sondes transmit continuously - average over the last frame, and use a peak hold
+            demod_stats = FSKDemodStats(averaging_time=5.0, peak_hold=True)
+            self.rx_frequency = self.sonde_freq
+
+        elif self.sonde_type == "WXRPN9":
+            # Weathex WxR-301D Sonde, PN9 variant
+
+            _baud_rate = 5000
+            _sample_rate = 100000
+
+            # Limit FSK estimator window to roughly +/- 40 kHz
+            _lower = -40000
+            _upper = 40000
+
+            demod_cmd = get_sdr_iq_cmd(
+                sdr_type = self.sdr_type,
+                frequency = self.sonde_freq,
+                sample_rate = _sample_rate,
+                sdr_hostname = self.sdr_hostname,
+                sdr_port = self.sdr_port,
+                ss_iq_path = self.ss_iq_path,
+                rtl_device_idx = self.rtl_device_idx,
+                ppm = self.ppm,
+                gain = self.gain,
+                bias = self.bias,
+                dc_block = True
+            )
+
+            # Add in tee command to save IQ to disk if debugging is enabled.
+            if self.save_decode_iq:
+                demod_cmd += f" tee {self.save_decode_iq_path} |"
+
+            # Trying out using the mask estimator here to reduce issues with interference
+            demod_cmd += "./fsk_demod --cs16 -s -b %d -u %d --mask 50000 --stats=%d 2 %d %d - -" % (
+                _lower,
+                _upper,
+                _stats_rate,
+                _sample_rate,
+                _baud_rate,
+            )
+
+            # Soft-decision decoding, inverted.
+            decode_cmd = f"./weathex301d --softin -i --json --pn9 2>/dev/null"
 
             # Weathex sondes transmit continuously - average over the last frame, and use a peak hold
             demod_stats = FSKDemodStats(averaging_time=5.0, peak_hold=True)
@@ -1700,7 +1771,7 @@ class SondeDecoder(object):
 
             # Weathex Specific Actions
             # Same datetime issues as with iMets, and LMS6
-            if self.sonde_type == "WXR301":
+            if (self.sonde_type == "WXR301") or (self.sonde_type == "WXRPN9"):
                 # Fix up the time.
                 _telemetry["datetime_dt"] = fix_datetime(_telemetry["datetime"])
                 # Re-generate the datetime string.
