@@ -20,10 +20,6 @@ from threading import Thread, Lock
 from types import FunctionType, MethodType
 from .utils import (
     detect_peaks,
-    rtlsdr_test,
-    reset_rtlsdr_by_serial,
-    reset_all_rtlsdrs,
-    peak_decimation,
     timeout_cmd
 )
 from .sdr_wrappers import test_sdr, reset_sdr, get_sdr_name, get_sdr_iq_cmd, get_sdr_fm_cmd, get_power_spectrum, shutdown_sdr
@@ -330,7 +326,8 @@ def detect_sonde(
             bias = bias,
             sdr_hostname = sdr_hostname,
             sdr_port = sdr_port,
-            ss_iq_path = ss_iq_path
+            ss_iq_path = ss_iq_path,
+            scan = True
         )
 
         # rx_test_command = (
@@ -436,7 +433,7 @@ def detect_sonde(
         ret_output = ret_output.decode("utf8")
 
         # Release the SDR channel if necessary
-        shutdown_sdr(sdr_type, rtl_device_idx, sdr_hostname, frequency)
+        shutdown_sdr(sdr_type, rtl_device_idx, sdr_hostname, frequency, scan=True)
 
     except subprocess.CalledProcessError as e:
         # dft_detect returns a code of 1 if no sonde is detected.
@@ -626,9 +623,7 @@ def detect_sonde(
             % (_sdr_name, _score, _offset_est)
         )
         _sonde_type = "WXRPN9"
-        # Clear out the offset estimate for WxR-301's as it's not accurate
-        # to do no whitening on the signal.
-        _offset_est = 0.0
+        
     else:
         _sonde_type = None
 
@@ -975,9 +970,8 @@ class SondeScanner(object):
                 raise ValueError("Error getting PSD")
 
             # Update the global scan result
-            (_freq_decimate, _power_decimate) = peak_decimation(freq / 1e6, power, 10)
-            scan_result["freq"] = list(_freq_decimate)
-            scan_result["power"] = list(_power_decimate)
+            scan_result["freq"] = [round(x,6) for x in list(freq/1e6)]
+            scan_result["power"] = [round(x,2) for x in list(power)]
             scan_result["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             scan_result["peak_freq"] = []
             scan_result["peak_lvl"] = []
