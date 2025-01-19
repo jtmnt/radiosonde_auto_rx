@@ -8,6 +8,7 @@
 import autorx
 import datetime
 import logging
+import math
 import numpy as np
 import os
 import sys
@@ -287,13 +288,7 @@ def detect_sonde(
             _if_bw = 64
         else:
             _iq_bw = 48000
-            _if_bw = 20
-
-            # Try and avoid the RTLSDR 403.2 MHz spur.
-            # Note that this is only goign to work if we are detecting on 403.210 or 403.190 MHz.
-            if (abs(403200000 - frequency) < 20000) and (sdr_type == "RTLSDR"):
-                logging.debug("Scanner - Narrowing detection IF BW to avoid RTLSDR spur.")
-                _if_bw = 15
+            _if_bw = 15
         
     else:
         # 1680 MHz sondes
@@ -1072,6 +1067,7 @@ class SondeScanner(object):
             # This is actually a bit of a pain to do...
             _peak_freq = []
             _peak_lvl = []
+            _search_radius = math.ceil((self.quantization / 2) / self.search_step)
             for _peak in peak_frequencies:
                 try:
                     # Find the index of the peak within our decimated frequency array.
@@ -1081,13 +1077,13 @@ class SondeScanner(object):
                     # Because we've decimated the freq & power data, the peak location may
                     # not be exactly at this frequency, so we take the maximum of an area
                     # around this location.
-                    _peak_search_min = max(0, _peak_power_idx - 5)
+                    _peak_search_min = max(0, _peak_power_idx - _search_radius)
                     _peak_search_max = min(
-                        len(scan_result["freq"]) - 1, _peak_power_idx + 5
+                        len(scan_result["freq"]) - 1, _peak_power_idx + _search_radius
                     )
                     # Grab the maximum value, and append it and the frequency to the output arrays
                     _peak_lvl.append(
-                        max(scan_result["power"][_peak_search_min:_peak_search_max])
+                        max(scan_result["power"][_peak_search_min:_peak_search_max + 1])
                     )
                     _peak_freq.append(_peak / 1e6)
                 except:

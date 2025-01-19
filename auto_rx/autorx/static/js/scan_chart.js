@@ -16,6 +16,9 @@ function setup_scan_chart(){
 	        ['x_spectra',autorx_config.min_freq, autorx_config.max_freq],
 	        ['Spectra',0,0]
 	    ],
+		colors: {
+			Spectra: "#2f77b4"
+		},
 	    type:'line'
 	};
 
@@ -27,6 +30,9 @@ function setup_scan_chart(){
 	        ['x_peaks',0],
 	        ['Peaks',0]
 	    ],
+		colors: {
+			Peaks: "#ff7f0e"
+		},
 	    type:'scatter'
 	};
 
@@ -38,12 +44,18 @@ function setup_scan_chart(){
 	        ['x_thresh',autorx_config.min_freq, autorx_config.max_freq],
 	        ['Threshold',autorx_config.snr_threshold,autorx_config.snr_threshold]
 	    ],
+		colors: {
+			Threshold: "#2ca02c"
+		},
 	    type:'line'
 	};
 
 	scan_chart_obj = c3.generate({
 	    bindto: '#scan_chart',
 	    data: scan_chart_spectra,
+        transition: {
+            duration: 0
+        },
         tooltip: {
             format: {
                 title: function (d) { return (Math.round(d * 1000) / 1000) + " MHz"; },
@@ -67,13 +79,19 @@ function setup_scan_chart(){
 	            label:"Power (dB - Uncalibrated)"
 	        }
 	    },
+		size: {
+			height: 200
+		},
+		legend: {
+			show: false
+		},
 	    point:{r:10}
 	});
 }
 
 function redraw_scan_chart(){
 	// Plot the updated data.
-	if(scan_chart_last_drawn === scan_chart_latest_timestamp){
+	if(!scan_chart_latest_timestamp || scan_chart_last_drawn === scan_chart_latest_timestamp){
 		// No need to re-draw.
 		//console.log("No need to re-draw.");
 		return;
