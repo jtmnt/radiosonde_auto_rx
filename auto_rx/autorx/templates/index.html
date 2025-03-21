@@ -507,12 +507,12 @@
                         _sondehub_id = _cell_data.id.replace(/^(DFM|M10|M20|IMET|IMET5|IMET54|MRZ|IMS100|RS11G|MTS01|WXR)-/,"");
 
                         // Add Sondehub Link
-                        _id += "&nbsp;<a href='http://sondehub.org/" + _sondehub_id + "' title='View on Sondehub' target='_blank'>" + "<img src='{{ url_for('static', filename='img/sondehub.png')}}'/>" + "</a>";
+                        _id += "&nbsp;<a href='http://sondehub.org/" + _sondehub_id + "' title='View on Sondehub' target='_blank'>" + "<img src='{{ url_for('static', filename='img/sondehub.png')}}' width='14' height='16'/>" + "</a>";
 
                         // Add Radiosondy Link
                         if(_cell_data.aprsid != null){
                             _aprs_id = _cell_data.aprsid.trim();
-                            _id += "<a href='https://radiosondy.info/sonde_archive.php?sondenumber=" + _aprs_id + "' title='View on Radiosondy.info' target='_blank'>" + "<img src='{{ url_for('static', filename='img/radiosondy.png')}}'/>" + "</a>";
+                            _id += "<a href='https://radiosondy.info/sonde_archive.php?sondenumber=" + _aprs_id + "' title='View on Radiosondy.info' target='_blank'>" + "<img src='{{ url_for('static', filename='img/radiosondy.png')}}' width='17' height='16'/>" + "</a>";
 
                         } else {
                             _aprs_id = null;
@@ -1511,6 +1511,7 @@
                     <option value="8">Eight</option>
                     <option value="9">Nine</option>
                     <option value="10">Ten</option>
+                    <option value="999">All</option>
                 </select>
                   </div>
                   <br>
@@ -1638,6 +1639,7 @@
                 <option value="LMS6">LMS6 (400 MHz)</option>
                 <option value="MK2LMS">LMS6 (1680 MHz)</option>
                 <option value="IMET">iMet-4</option>
+                <option value="IMETWIDE">iMet-1/4 Wideband</option>
                 <option value="IMET5">iMet-50/54</option>
                 <option value="MEISEI">iMS-100</option>
                 <option value="MRZ">MRZ-H1</option>
