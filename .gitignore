@@ -74,3 +74,4 @@ rs_module/rs41mod
 rs_module/rs92mod
 scan/reset_usb
 scan/rs_detect
+/.vs
