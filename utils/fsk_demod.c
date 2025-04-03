@@ -6,7 +6,7 @@
 
   C test driver for fsk_demod in fsk.c. Reads in a stream of 32 bit cpu endian
   floats and writes out the detected bits
-   
+
 
 \*---------------------------------------------------------------------------*/
 
@@ -54,6 +54,7 @@ int main(int argc,char *argv[]){
     struct FSK *fsk;
     struct MODEM_STATS stats;
     int Fs,Rs,M,P,stats_ctr,stats_loop;
+    long sample_count;
     float loop_time;
     int enable_stats = 0;
     FILE *fin,*fout;
@@ -76,12 +77,14 @@ int main(int argc,char *argv[]){
     int nsym = FSK_DEFAULT_NSYM;
     int mask = 0;
     int tx_tone_separation = 100;
-    
+    int softinv = 0;
+
     int o = 0;
     int opt_idx = 0;
     while( o != -1 ){
         static struct option long_opts[] = {
             {"help",      no_argument,        0, 'h'},
+            {"softinv",   no_argument,        0, 'i'},
             {"conv",      required_argument,  0, 'p'},
             {"cs16",      no_argument,        0, 'c'},
             {"cu8",       no_argument,        0, 'd'},
@@ -94,9 +97,9 @@ int main(int argc,char *argv[]){
             {"mask",      required_argument,  0, 'm'},
             {0, 0, 0, 0}
         };
-        
-        o = getopt_long(argc,argv,"fhlp:cdt::sb:u:m",long_opts,&opt_idx);
-        
+
+        o = getopt_long(argc,argv,"fhilp:cdt::sb:u:m",long_opts,&opt_idx);
+
         switch(o){
         case 'c':
             complex_input = 2;
@@ -108,6 +111,9 @@ int main(int argc,char *argv[]){
             break;
         case 'f':
             testframe_mode = 1;
+            break;
+        case 'i':
+            softinv = 1;
             break;
         case 't':
             enable_stats = 1;
@@ -152,12 +158,12 @@ int main(int argc,char *argv[]){
         }
     }
     int dx = optind;
-    
+
     if( (argc - dx) < 5){
         fprintf(stderr, "Too few arguments\n");
         goto helpmsg;
     }
-    
+
     if( (argc - dx) > 5) {
         fprintf(stderr, "Too many arguments\n");
     helpmsg:
@@ -180,24 +186,24 @@ int main(int argc,char *argv[]){
         fprintf(stderr," --mask TxFreqSpace Use \"mask\" freq estimator (default is \"peak\" estimator)\n");
         exit(1);
     }
-    
+
     /* Extract parameters */
     M = atoi(argv[dx]);
     Fs = atoi(argv[dx + 1]);
     Rs = atoi(argv[dx + 2]);
-    
+
     if( (M!=2) && (M!=4) ){
         fprintf(stderr,"Mode %d is not valid. Mode must be 2 or 4.\n",M);
         goto helpmsg;
     }
-    
+
     /* Open files */
     if(strcmp(argv[dx + 3],"-")==0){
         fin = stdin;
     }else{
         fin = fopen(argv[dx + 3],"r");
     }
-    
+
     if(strcmp(argv[dx + 4],"-")==0){
         fout = stdout;
     }else{
@@ -222,22 +228,22 @@ int main(int argc,char *argv[]){
     fsk_set_freq_est_limits(fsk,fsk_lower,fsk_upper);
 
     fsk_set_freq_est_alg(fsk, mask);
-    
+
     if(fin==NULL || fout==NULL || fsk==NULL){
         fprintf(stderr,"Couldn't open files\n");
         exit(1);
     }
 
     /* set up testframe mode */
-         
+
     int      testframecnt, bitcnt, biterr, testframe_detected;
     uint8_t *bitbuf_tx = NULL, *bitbuf_rx = NULL;
     if (testframe_mode) {
         bitbuf_tx = (uint8_t*)malloc(sizeof(uint8_t)*TEST_FRAME_SIZE); assert(bitbuf_tx != NULL);
         bitbuf_rx = (uint8_t*)malloc(sizeof(uint8_t)*TEST_FRAME_SIZE); assert(bitbuf_rx != NULL);
-    
+
         /* Generate known tx frame from known seed */
-        
+
         srand(158324);
         for(i=0; i<TEST_FRAME_SIZE; i++){
             bitbuf_tx[i] = rand()&0x1;
@@ -248,13 +254,13 @@ int main(int argc,char *argv[]){
         bitcnt = 0;
         biterr = 0;
     }
-    
+
     if(enable_stats){
         loop_time = ((float)fsk_nin(fsk))/((float)Fs);
         stats_loop = (int)(1/(stats_rate*loop_time));
         stats_ctr = 0;
     }
-    
+
     /* allocate buffers for processing */
     if(soft_dec_mode){
         sdbuf = (float*)malloc(sizeof(float)*fsk->Nbits); assert(sdbuf != NULL);
@@ -265,13 +271,13 @@ int main(int argc,char *argv[]){
     modbuf = (COMP*)malloc(sizeof(COMP)*(fsk->N+fsk->Ts*2));
 
     /* set up signal handler so we can terminate gracefully */
-    
+
     if (signal(SIGTERM, sig_handler) == SIG_ERR) {
         printf("\ncan't catch SIGTERM\n");
     }
-    
+
     /* Demodulate! */
-    
+
     while( fread(rawbuf,bytes_per_sample*complex_input,fsk_nin(fsk),fin) == fsk_nin(fsk) ){
         /* convert input to a buffer of floats.  Note scaling isn't really necessary for FSK */
 
@@ -280,6 +286,7 @@ int main(int argc,char *argv[]){
             for(i=0;i<fsk_nin(fsk);i++){
                 modbuf[i].real = ((float)rawbuf[i])/FDMDV_SCALE;
                 modbuf[i].imag = 0.0;
+                sample_count++;
             }
         }
         else {
@@ -289,6 +296,7 @@ int main(int argc,char *argv[]){
                 for(i=0;i<fsk_nin(fsk);i++){
                     modbuf[i].real = ((float)rawbuf_u8[2*i]-127.0)/128.0;
                     modbuf[i].imag = ((float)rawbuf_u8[2*i+1]-127.0)/128.0;
+                    sample_count++;
                 }
             }
             else {
@@ -296,8 +304,9 @@ int main(int argc,char *argv[]){
                 for(i=0;i<fsk_nin(fsk);i++){
                     modbuf[i].real = ((float)rawbuf[2*i])/FDMDV_SCALE;
                     modbuf[i].imag = ((float)rawbuf[2*i+1]/FDMDV_SCALE);
+                    sample_count++;
                 }
-            }            
+            }
         }
 
         if(soft_dec_mode){
@@ -305,7 +314,7 @@ int main(int argc,char *argv[]){
         }else{
             fsk_demod(fsk,bitbuf,modbuf);
         }
-        
+
         testframe_detected = 0;
         if (testframe_mode) {
             /* attempt to find a testframe and update stats */
@@ -332,7 +341,7 @@ int main(int argc,char *argv[]){
                         errs++;
                     }
                 }
-                
+
                 if (errs < 0.1*TEST_FRAME_SIZE) {
                     /* OK, we have a valid test frame sync, so lets count errors */
                     testframe_detected = 1;
@@ -346,7 +355,7 @@ int main(int argc,char *argv[]){
                 }
             }
         } /* if (testframe_mode) ... */
-        
+
         if (enable_stats) {
             if ((stats_ctr < 0) || testframe_detected) {
                 fsk_get_demod_stats(fsk,&stats);
@@ -356,7 +365,7 @@ int main(int argc,char *argv[]){
                 fprintf(stderr,"{");
                 time_t seconds  = time(NULL);
 
-                fprintf(stderr,"\"secs\": %ld, \"EbNodB\": %5.1f, \"ppm\": %4d,",seconds, stats.snr_est, (int)fsk->ppm);
+                fprintf(stderr,"\"secs\": %ld, \"samples\": %ld, \"EbNodB\": %5.1f, \"ppm\": %4d,",seconds, sample_count, stats.snr_est, (int)fsk->ppm);
                 float *f_est;
                 if (fsk->freq_est_type)
                     f_est = fsk->f2_est;
@@ -369,11 +378,11 @@ int main(int argc,char *argv[]){
                 if(fsk->mode == 4){
                     fprintf(stderr,", \"f3_est\":%.1f, \"f4_est\":%.1f",f_est[2],f_est[3]);
                 }
-	    
+
                 if (testframe_mode == 0) {
                     /* Print the eye diagram */
 
-                    fprintf(stderr,",\t\"eye_diagram\":[");                 
+                    fprintf(stderr,",\t\"eye_diagram\":[");
                     for(i=0;i<stats.neyetr;i++){
                         fprintf(stderr,"[");
                         for(j=0;j<stats.neyesamp;j++){
@@ -384,7 +393,7 @@ int main(int argc,char *argv[]){
                         if(i<stats.neyetr-1) fprintf(stderr,",");
                     }
                     fprintf(stderr,"],");
-	    
+
                     /* Print a sample of the FFT from the freq estimator */
                     fprintf(stderr,"\"samp_fft\":[");
                     Ndft = fsk->Ndft/2;
@@ -394,12 +403,12 @@ int main(int argc,char *argv[]){
                     }
                     fprintf(stderr,"]");
                 }
-                
+
                 if (testframe_mode) {
                     fprintf(stderr,", \"frames\":%d, \"bits\":%d, \"errs\":%d",testframecnt,bitcnt,biterr);
                 }
-                
-                fprintf(stderr,"}\n");                
+
+                fprintf(stderr,"}\n");
 
                 if (stats_ctr < 0) {
                     stats_ctr = stats_loop;
@@ -411,35 +420,38 @@ int main(int argc,char *argv[]){
         }
 
         if(soft_dec_mode){
+            // Invert soft decision polarity.
+            if(softinv){
+                for(j=0; j<fsk->Nbits; j++) {
+                    sdbuf[j] = sdbuf[j]*-1.0;
+                }
+            }
+
             fwrite(sdbuf,sizeof(float),fsk->Nbits,fout);
         }else{
             fwrite(bitbuf,sizeof(uint8_t),fsk->Nbits,fout);
         }
 
-        if(fin == stdin || fout == stdin){
-            fflush(fin);
-            fflush(fout);
-        }
+        if (fout == stdout) fflush(stdout);
     } /* while(fread ...... */
 
     if (testframe_mode) {
         free(bitbuf_tx);
         free(bitbuf_rx);
     }
-    
+
     if(soft_dec_mode){
         free(sdbuf);
     }else{
         free(bitbuf);
     }
-    
+
     free(rawbuf);
     free(modbuf);
-    
+
     fclose(fin);
     fclose(fout);
     fsk_destroy(fsk);
 
     return 0;
 }
-

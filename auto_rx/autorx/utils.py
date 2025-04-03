@@ -7,6 +7,7 @@
 #
 
 from __future__ import division, print_function
+import codecs
 import fcntl
 import logging
 import os
@@ -18,17 +19,12 @@ import threading
 import time
 import numpy as np
 import semver
+import shutil
 from dateutil.parser import parse
 from datetime import datetime, timedelta
 from math import radians, degrees, sin, cos, atan2, sqrt, pi
+from queue import Queue
 from . import __version__ as auto_rx_version
-
-try:
-    # Python 2
-    from Queue import Queue
-except ImportError:
-    # Python 3
-    from queue import Queue
 
 
 # List of binaries we check for on startup
@@ -36,19 +32,38 @@ REQUIRED_RS_UTILS = [
     "dft_detect",
     "dfm09mod",
     "m10mod",
-    "imet1rs_dft",
     "rs41mod",
     "rs92mod",
     "fsk_demod",
-    "mk2a_lms1680",
+    "mk2a1680mod",
     "lms6Xmod",
     "meisei100mod",
     "imet54mod",
     "mp3h1mod",
+    "m20mod",
+    "imet4iq",
+    "mts01mod",
+    "iq_dec",
+    "weathex301d"
 ]
 
+_timeout_cmd = None
 
-def check_rs_utils():
+def timeout_cmd():
+    global _timeout_cmd
+    if not _timeout_cmd:
+        t=shutil.which("gtimeout")
+        if t:
+            _timeout_cmd = "gtimeout -k 30 "
+        else:
+            if not shutil.which("timeout"):
+                logging.critical("timeout command-line tool not present in system. try installing gtimeout.")
+                sys.exit(1)
+            else:
+                _timeout_cmd = "timeout -k 30 "
+    return _timeout_cmd
+
+def check_rs_utils(config):
     """ Check the required RS decoder binaries exist
         Currently we just check there is a file present - we don't check functionality.
     """
@@ -56,6 +71,7 @@ def check_rs_utils():
         if not os.path.isfile(_file):
             logging.critical("Binary %s does not exist - did you run build.sh?" % _file)
             return False
+        _ = timeout_cmd()
 
     return True
 
@@ -69,8 +85,8 @@ def get_autorx_version(version_url=AUTORX_MAIN_VERSION_URL):
     try:
         _r = requests.get(version_url, timeout=5)
     except Exception as e:
-        logging.exception(
-            f"Version - Error determining version from URL {version_url}", e
+        logging.error(
+            f"Version - Error determining version from URL {version_url}: {str(e)}"
         )
         return None
 
@@ -82,8 +98,8 @@ def get_autorx_version(version_url=AUTORX_MAIN_VERSION_URL):
                 return _main_version
 
     except Exception as e:
-        logging.exception(
-            f"Version - Error extracting version from url {version_url}.", e
+        logging.error(
+            f"Version - Error extracting version from url {version_url}: {str(e)}."
         )
         return None
 
@@ -109,7 +125,7 @@ def check_autorx_versions(current_version=auto_rx_version):
         # User is on a testing branch version.
         # Compare against the testing branch version - when a release is made, the testing
         # branch will have the same version as the main branch, then will advance.
-        if semver.compare(_testing_branch_version, current_version):
+        if semver.compare(_testing_branch_version, current_version) == 1:
             # Newer testing version available.
             return _testing_branch_version
         else:
@@ -117,7 +133,7 @@ def check_autorx_versions(current_version=auto_rx_version):
             return "Latest"
     else:
         # User is running the main branch
-        if semver.compare(_main_branch_version, current_version):
+        if semver.compare(_main_branch_version, current_version) == 1:
             return _main_branch_version
         else:
             return "Latest"
@@ -144,7 +160,7 @@ def strip_sonde_serial(serial):
     """ Strip off any leading sonde type that may be present in a serial number """
 
     # Look for serials with prefixes matching the following known sonde types.
-    _re = re.compile("^(DFM|M10|M20|IMET|IMET54|MRZ|LMS6)-")
+    _re = re.compile("^(DFM|M10|M20|IMET|IMET5|IMET54|MRZ|LMS6|IMS100|RS11G|MTS01|WXR)-")
 
     # If we have a match, return the trailing part of the serial, re-adding
     # any - separators if they exist.
@@ -170,22 +186,36 @@ def short_type_lookup(type_name):
             return "Vaisala " + type_name
     elif type_name.startswith("DFM"):
         return "Graw " + type_name
+    elif type_name == "PS15":
+        return "Graw PS15"
     elif type_name.startswith("M10"):
         return "Meteomodem M10"
     elif type_name.startswith("M20"):
         return "Meteomodem M20"
     elif type_name == "LMS6":
-        return "Lockheed Martin LMS6-400"
+        return "Lockheed Martin LMS6-403"
     elif type_name == "MK2LMS":
         return "Lockheed Martin LMS6-1680"
     elif type_name == "IMET":
         return "Intermet Systems iMet-1/4"
+    elif type_name == "IMET-XDATA":
+        return "Intermet Systems iMet-1/4 + XDATA"
     elif type_name == "IMET5":
-        return "Intermet Systems iMet-54"
+        return "Intermet Systems iMet-5x"
     elif type_name == "MEISEI":
         return "Meisei iMS-100/RS-11"
+    elif type_name == "IMS100":
+        return "Meisei iMS-100"
+    elif type_name == "RS11G":
+        return "Meisei RS-11G"
     elif type_name == "MRZ":
         return "Meteo-Radiy MRZ"
+    elif type_name == "MTS01":
+        return "Meteosis MTS01"
+    elif type_name == "WXR301":
+        return "Weathex WxR-301D"
+    elif type_name == "WXRPN9":
+        return "Weathex WxR-301D (PN9 Variant)"
     else:
         return "Unknown"
 
@@ -209,23 +239,137 @@ def short_short_type_lookup(type_name):
     elif type_name.startswith("M20"):
         return "M20"
     elif type_name == "LMS6":
-        return "LMS6-400"
+        return "LMS6-403"
     elif type_name == "MK2LMS":
         return "LMS6-1680"
     elif type_name == "IMET":
         return "iMet-1/4"
+    elif type_name == "IMET-XDATA":
+        return "iMet-1/4"
     elif type_name == "IMET5":
-        return "iMet-54"
+        return "iMet-5x"
     elif type_name == "MEISEI":
         return "iMS-100"
+    elif type_name == "IMS100":
+        return "iMS-100"
+    elif type_name == "RS11G":
+        return "RS-11G"
     elif type_name == "MRZ":
         return "MRZ"
+    elif type_name == "MTS01":
+        return "MTS01"
+    elif type_name == "WXR301":
+        return "WXR301"
+    elif type_name == "WXRPN9":
+        return "WXR301(PN9)"
+    elif type_name == "PS15":
+        return "PS15"
     else:
         return "Unknown"
 
 
+def generate_aprs_id(sonde_data):
+        """ Generate an APRS-compatible object name based on the radiosonde type and ID. """
+
+        _object_name = None
+
+        # Use the radiosonde ID as the object ID
+        if ("RS92" in sonde_data["type"]) or ("RS41" in sonde_data["type"]):
+            # We can use the Vaisala sonde ID directly.
+            _object_name = sonde_data["id"].strip()
+        elif "DFM" in sonde_data["type"] or "PS15" in sonde_data["type"]:
+            # As per agreement with other radiosonde decoding software developers, we will now
+            # use the DFM serial number verbatim in the APRS ID, prefixed with 'D'.
+            # For recent DFM sondes, this will result in a object ID of: Dyynnnnnn
+            # Where yy is the manufacture year, and nnnnnn is a sequential serial.
+            # Older DFMs may have only a 6-digit ID of Dnnnnnn.
+            # Mark J - 2019-12-29
+
+            # Split out just the serial number part of the ID, and cast it to an int
+            # This acts as another check that we have been provided with a numeric serial.
+            _dfm_id = int(sonde_data["id"].split("-")[-1])
+
+            # Create the object name
+            _object_name = "D%d" % _dfm_id
+
+        elif "M10" in sonde_data["type"]:
+            # Use the generated id same as dxlAPRS
+            _object_name = sonde_data["aprsid"]
+
+        elif "M20" in sonde_data["type"]:
+            # Generate the M20 ID based on the first two hex digits of the
+            # raw hexadecimal id, followed by the last decimal section.
+            # Why we do this and not just use the three hex bytes, nobody knows...
+            if 'rawid' in sonde_data:
+                _object_name = "ME" + sonde_data['rawid'].split('_')[1][:2] + sonde_data["id"].split("-")[-1]
+            else:
+                _object_name = None
+
+        elif "IMET" in sonde_data["type"]:
+            # Use the last 5 characters of the unique ID we have generated.
+            _object_name = "IMET" + sonde_data["id"][-5:]
+
+
+        elif "LMS" in sonde_data["type"]:
+            # Use the last 5 hex digits of the sonde ID.
+            _id_suffix = int(sonde_data["id"].split("-")[1])
+            _id_hex = hex(_id_suffix).upper()
+            _object_name = "LMS6" + _id_hex[-5:]
+        
+        elif "WXR" in sonde_data["type"]:
+            # Use the last 6 hex digits of the sonde ID.
+            _id_suffix = int(sonde_data["id"].split("-")[1])
+            _id_hex = hex(_id_suffix).upper()
+            _object_name = "WXR" + _id_hex[-6:]
+
+        elif "MEISEI" in sonde_data["type"] or "IMS100" in sonde_data["type"] or "RS11G" in sonde_data["type"]:
+            # Convert the serial number to an int
+            _meisei_id = int(sonde_data["id"].split("-")[-1])
+            _id_suffix = hex(_meisei_id).upper().split("0X")[1]
+            # Clip to 6 hex digits, in case we end up with more for some reason.
+            if len(_id_suffix) > 6:
+                _id_suffix = _id_suffix[-6:]
+            _object_name = "IMS" + _id_suffix
+
+        elif "MRZ" in sonde_data["type"]:
+            # Concatenate the two portions of the serial number, convert to an int,
+            # then take the 6 least-significant hex digits as our ID, prefixed with 'MRZ'.
+            # e.g. MRZ-5667-39155 -> 566739155 -> 21C7C0D3 -> MRZC7C0D3
+            _mrz_id_parts = sonde_data["id"].split("-")
+            _mrz_id = int(_mrz_id_parts[1] + _mrz_id_parts[2])
+            _id_hex = "%06x" % _mrz_id
+            if len(_id_hex) > 6:
+                _id_hex = _id_hex[-6:]
+            _object_name = "MRZ" + _id_hex.upper()
+
+        elif "MTS01" in sonde_data["type"]:
+            # Split out just the serial number part of the ID, and cast it to an int
+            # This acts as another check that we have been provided with a numeric serial.
+            _mts_id = int(sonde_data["id"].split("-")[-1])
+
+            # Convert to upper-case hex, and take the last 6 nibbles.
+            _id_suffix = hex(_mts_id).upper()[-6:]
+
+            # Create the object name
+            _object_name = "MTS" + _id_suffix
+
+
+        # New Sonde types will be added in here.
+        else:
+            # Unknown sonde type, don't know how to handle this yet.
+            _object_name = None
+
+        # Pad or clip to 9 characters
+        if len(_object_name) > 9:
+            _object_name = _object_name[:9]
+        elif len(_object_name) < 9:
+            _object_name = _object_name + " " * (9 - len(_object_name))
+
+        return _object_name
+
+
 def readable_timedelta(duration: timedelta):
-    """ 
+    """
     Convert a timedelta into a readable string.
     From: https://codereview.stackexchange.com/a/245215
     """
@@ -636,8 +780,7 @@ def is_not_linux():
 
     # Second check for the existence of '-Microsoft' in the uname release field.
     # This is a good check that we are running in WSL.
-    # Note the use of indexing instead of the named field, for Python 2 & 3 compatability.
-    if "Microsoft" in platform.uname()[2]:
+    if "Microsoft" in platform.uname().release:
         return True
 
     # Else, we're probably in native Linux!
@@ -652,8 +795,10 @@ def reset_usb(bus, device):
         try:
             fcntl.ioctl(usb_file, _USBDEVFS_RESET)
 
-        except IOError:
-            logging.error("RTLSDR - USB Reset Failed.")
+        # This was just catching IOError, just catch everything and print.
+        except Exception as e:
+            logging.error(f"RTLSDR - USB Reset Failed - {str(e)}")
+
 
 
 def is_rtlsdr(vid, pid):
@@ -670,10 +815,10 @@ def is_rtlsdr(vid, pid):
 def reset_rtlsdr_by_serial(serial):
     """ Attempt to reset a RTLSDR with a provided serial number """
 
-    # If not Linux, return immediately.
+    # If not Linux, raise exception and let auto_rx.py convert it to exit status code.
     if is_not_linux():
         logging.debug("RTLSDR - Not a native Linux system, skipping reset attempt.")
-        return
+        raise SystemError("SDR unresponsive")
 
     lsusb_info = lsusb()
     bus_num = None
@@ -747,10 +892,10 @@ def find_rtlsdr(serial=None):
 def reset_all_rtlsdrs():
     """ Reset all RTLSDR devices found in the lsusb tree """
 
-    # If not Linux, return immediately.
+    # If not Linux, raise exception and let auto_rx.py convert it to exit status code.
     if is_not_linux():
         logging.debug("RTLSDR - Not a native Linux system, skipping reset attempt.")
-        return
+        raise SystemError("SDR unresponsive")
 
     lsusb_info = lsusb()
     bus_num = None
@@ -800,11 +945,12 @@ def rtlsdr_test(device_idx="0", rtl_sdr_path="rtl_sdr", retries=5):
         logging.debug("RTLSDR - TCP Device, skipping RTLSDR test step.")
         return True
 
-    _rtl_cmd = "timeout 5 %s -d %s -n 200000 - > /dev/null" % (
+    _rtl_cmd = "%s 5 %s -d %s -f 400000000 -n 200000 - > /dev/null" % (
+        timeout_cmd(),
         rtl_sdr_path,
         str(device_idx),
     )
-
+    
     # First, check if the RTLSDR with a provided serial number is present.
     if device_idx == "0":
         # Check for the presence of any RTLSDRs.
@@ -830,10 +976,16 @@ def rtlsdr_test(device_idx="0", rtl_sdr_path="rtl_sdr", retries=5):
             FNULL = open(os.devnull, "w")  # Inhibit stderr output
             _ret_code = subprocess.check_call(_rtl_cmd, shell=True, stderr=FNULL)
             FNULL.close()
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
             # This exception means the subprocess has returned an error code of one.
-            # This indicates either the RTLSDR doesn't exist, or
-            pass
+            # This indicates either the RTLSDR doesn't exist, or some other error.
+            if e.returncode == 127:
+                # 127 = File not found
+                logging.critical("rtl_sdr utilities (rtl_sdr, rtl_fm, rtl_power) not found!")
+                return False
+            else:
+                logging.warning(f"rtl_sdr test call resulted in return code of {e.returncode}.")
+                pass
         else:
             # rtl-sdr returned OK. We can return True now.
             time.sleep(1)
@@ -848,7 +1000,7 @@ def rtlsdr_test(device_idx="0", rtl_sdr_path="rtl_sdr", retries=5):
 
         # Decrement out retry count, then wait a bit before looping
         _rtlsdr_retries -= 1
-        time.sleep(2)
+        time.sleep(5)
 
     # If we run out of retries, clearly the RTLSDR isn't working.
     logging.error(

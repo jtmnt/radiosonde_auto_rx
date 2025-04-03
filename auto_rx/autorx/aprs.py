@@ -11,15 +11,10 @@ import random
 import time
 import traceback
 import socket
+from queue import Queue
 from threading import Thread, Lock
 from . import __version__ as auto_rx_version
-
-try:
-    # Python 2
-    from Queue import Queue
-except ImportError:
-    # Python 3
-    from queue import Queue
+from .utils import strip_sonde_serial
 
 
 def telemetry_to_aprs_position(
@@ -37,78 +32,27 @@ def telemetry_to_aprs_position(
 
     # Generate the APRS 'callsign' for the sonde.
     if object_name == "<id>":
-        # Use the radiosonde ID as the object ID
-        if ("RS92" in sonde_data["type"]) or ("RS41" in sonde_data["type"]):
-            # We can use the Vaisala sonde ID directly.
-            _object_name = sonde_data["id"].strip()
-        elif "DFM" in sonde_data["type"]:
-            # As per agreement with other radiosonde decoding software developers, we will now
-            # use the DFM serial number verbatim in the APRS ID, prefixed with 'D'.
-            # For recent DFM sondes, this will result in a object ID of: Dyynnnnnn
-            # Where yy is the manufacture year, and nnnnnn is a sequential serial.
-            # Older DFMs may have only a 6-digit ID of Dnnnnnn.
-            # Mark J - 2019-12-29
+        _object_name = None
 
-            # Split out just the serial number part of the ID, and cast it to an int
-            # This acts as another check that we have been provided with a numeric serial.
-            _dfm_id = int(sonde_data["id"].split("-")[-1])
+        # We should have been provided a APRS ID in the telemetry.
+        # This is added in in decode.py, and generated in utils.py
+        if 'aprsid' in sonde_data:
+            if sonde_data['aprsid'] is not None:
+                _object_name = sonde_data['aprsid']
 
-            # Create the object name
-            _object_name = "D%d" % _dfm_id
-
-            # Convert to upper-case hex, and take the last 5 nibbles.
-            _id_suffix = hex(_dfm_id).upper()[-5:]
-
-        elif "M10" in sonde_data["type"]:
-            # Use the generated id same as dxlAPRS
-            _object_name = sonde_data["aprsid"]
-
-        elif "IMET" in sonde_data["type"]:
-            # Use the last 5 characters of the unique ID we have generated.
-            _object_name = "IMET" + sonde_data["id"][-5:]
-
-        elif "LMS" in sonde_data["type"]:
-            # Use the last 5 hex digits of the sonde ID.
-            _id_suffix = int(sonde_data["id"].split("-")[1])
-            _id_hex = hex(_id_suffix).upper()
-            _object_name = "LMS6" + _id_hex[-5:]
-
-        elif "MEISEI" in sonde_data["type"]:
-            # Convert the serial number to an int
-            _meisei_id = int(sonde_data["id"].split("-")[-1])
-            _id_suffix = hex(_meisei_id).upper().split("0X")[1]
-            # Clip to 6 hex digits, in case we end up with more for some reason.
-            if len(_id_suffix) > 6:
-                _id_suffix = _id_suffix[-6:]
-            _object_name = "IMS" + _id_suffix
-
-        elif "MRZ" in sonde_data["type"]:
-            # Concatenate the two portions of the serial number, convert to an int,
-            # then take the 6 least-significant hex digits as our ID, prefixed with 'MRZ'.
-            # e.g. MRZ-5667-39155 -> 566739155 -> 21C7C0D3 -> MRZC7C0D3
-            _mrz_id_parts = sonde_data["id"].split("-")
-            _mrz_id = int(_mrz_id_parts[1] + _mrz_id_parts[2])
-            _id_hex = "%06x" % _mrz_id
-            if len(_id_hex) > 6:
-                _id_hex = _id_hex[-6:]
-            _object_name = "MRZ" + _id_hex.upper()
-
-        # New Sonde types will be added in here.
-        else:
+        # However, it may be 'None', which indicates we don't know how to handle this sonde ID yet.
+        if _object_name is None:
             # Unknown sonde type, don't know how to handle this yet.
             logging.error(
                 "No APRS ID conversion available for sonde type: %s"
                 % sonde_data["type"]
             )
             return (None, None)
+
     else:
         _object_name = object_name
 
-    # Pad or limit the object name to 9 characters, if it is to long or short.
-    if len(_object_name) > 9:
-        _object_name = _object_name[:9]
-    elif len(_object_name) < 9:
-        _object_name = _object_name + " " * (9 - len(_object_name))
+
 
     # Use the actual sonde frequency, if we have it.
     if "f_centre" in sonde_data:
@@ -125,7 +69,7 @@ def telemetry_to_aprs_position(
     # Generate the comment field.
     _aprs_comment = aprs_comment
     _aprs_comment = _aprs_comment.replace("<freq>", _freq)
-    _aprs_comment = _aprs_comment.replace("<id>", sonde_data["id"])
+    _aprs_comment = _aprs_comment.replace("<id>", strip_sonde_serial(sonde_data["id"]))
     _aprs_comment = _aprs_comment.replace("<temp>", "%.1fC" % sonde_data["temp"])
     _aprs_comment = _aprs_comment.replace(
         "<pressure>", "%.1fhPa" % sonde_data["pressure"]
@@ -138,9 +82,6 @@ def telemetry_to_aprs_position(
     _aprs_comment = _aprs_comment.replace("<type>", sonde_data["type"])
 
     # TODO: RS41 Burst Timer
-
-    # Add on auto_rx version
-    _aprs_comment += " auto_rx v" + auto_rx_version
 
     # Convert float latitude to APRS format (DDMM.MM)
     lat = float(sonde_data["lat"])
@@ -273,7 +214,7 @@ def generate_station_object(
     _datum = "!w%s%s!" % (_lat_prec, _lon_prec)
 
     # Generate timestamp using current UTC time
-    _aprs_timestamp = datetime.datetime.utcnow().strftime("%H%M%S")
+    _aprs_timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%H%M%S")
 
     # Add version string to position comment, if requested.
     _aprs_comment = comment
@@ -358,7 +299,7 @@ class APRSUploader(object):
         station_beacon_position=(0.0, 0.0, 0.0),
         station_beacon_comment="radiosonde_auto_rx SondeGate v<version>",
         station_beacon_icon="/r",
-        synchronous_upload_time=30,
+        upload_time=60,
         callsign_validity_threshold=5,
         upload_queue_size=16,
         upload_timeout=5,
@@ -389,9 +330,7 @@ class APRSUploader(object):
             station_beacon_comment (str): Comment field for the station beacon. <version> will be replaced with the current auto_rx version.
             station_beacon_icon (str): The APRS icon to be used, as the two characters (symbol table, symbol index), as per http://www.aprs.org/symbols.html
 
-            synchronous_upload_time (int): Upload the most recent telemetry when time.time()%synchronous_upload_time == 0
-                This is done in an attempt to get multiple stations uploading the same telemetry sentence simultaneously,
-                and also acts as decimation on the number of sentences uploaded to APRS-IS.
+            upload_time (int): Upload the most recent telemetry after this time is up.
 
             callsign_validity_threshold (int): Only upload telemetry data if the callsign has been observed more than N times. Default = 5
 
@@ -412,7 +351,8 @@ class APRSUploader(object):
         self.aprsis_reconnect = aprsis_reconnect
         self.upload_timeout = upload_timeout
         self.upload_queue_size = upload_queue_size
-        self.synchronous_upload_time = synchronous_upload_time
+        self.upload_time = upload_time
+        self.next_upload = time.monotonic() + upload_time
         self.callsign_validity_threshold = callsign_validity_threshold
         self.inhibit = inhibit
 
@@ -703,7 +643,7 @@ class APRSUploader(object):
         """ Add packets to the aprs upload queue if it is time for us to upload. """
 
         while self.timer_thread_running:
-            if int(time.time()) % self.synchronous_upload_time == 0:
+            if time.monotonic() > self.next_upload:
                 # Time to upload!
                 for _id in self.observed_payloads.keys():
                     # If no data, continue...
@@ -727,6 +667,9 @@ class APRSUploader(object):
 
                 # Flush APRS-IS RX buffer
                 self.flush_rx()
+
+                # Reset upload timer
+                self.next_upload = time.monotonic() + self.upload_time
             else:
                 # Not yet time to upload, wait for a bit.
                 time.sleep(0.1)
@@ -816,13 +759,19 @@ class APRSUploader(object):
 
         # Wait for all threads to close.
         if self.upload_thread is not None:
-            self.upload_thread.join()
+            self.upload_thread.join(60)
+            if self.upload_thread.is_alive():
+                self.log_error("aprs upload thread failed to join")
 
         if self.timer_thread is not None:
-            self.timer_thread.join()
+            self.timer_thread.join(60)
+            if self.timer_thread.is_alive():
+                self.log_error("aprs timer thread failed to join")
 
         if self.input_thread is not None:
-            self.input_thread.join()
+            self.input_thread.join(60)
+            if self.input_thread.is_alive():
+                self.log_error("aprs input thread failed to join")
 
     def log_debug(self, line):
         """ Helper function to log a debug message with a descriptive heading. 
@@ -858,10 +807,10 @@ if __name__ == "__main__":
     # ['frame', 'id', 'datetime', 'lat', 'lon', 'alt', 'temp', 'type', 'freq', 'freq_float', 'datetime_dt']
     test_telem = [
         # These types of DFM serial IDs are deprecated
-        # {'id':'DFM06-123456', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.utcnow()},
-        # {'id':'DFM09-123456', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.utcnow()},
-        # {'id':'DFM15-123456', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.utcnow()},
-        # {'id':'DFM17-12345678', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.utcnow()},
+        # {'id':'DFM06-123456', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.now(datetime.timezone.utc)},
+        # {'id':'DFM09-123456', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.now(datetime.timezone.utc)},
+        # {'id':'DFM15-123456', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.now(datetime.timezone.utc)},
+        # {'id':'DFM17-12345678', 'frame':10, 'lat':-10.0, 'lon':10.0, 'alt':10000, 'temp':1.0, 'type':'DFM', 'freq':'401.520 MHz', 'freq_float':401.52, 'heading':0.0, 'vel_h':5.1, 'vel_v':-5.0, 'datetime_dt':datetime.datetime.now(datetime.timezone.utc)},
         {
             "id": "DFM-19123456",
             "frame": 10,
@@ -878,7 +827,7 @@ if __name__ == "__main__":
             "heading": 0.0,
             "vel_h": 5.1,
             "vel_v": -5.0,
-            "datetime_dt": datetime.datetime.utcnow(),
+            "datetime_dt": datetime.datetime.now(datetime.timezone.utc),
         },
         {
             "id": "DFM-123456",
@@ -896,7 +845,7 @@ if __name__ == "__main__":
             "heading": 0.0,
             "vel_h": 5.1,
             "vel_v": -5.0,
-            "datetime_dt": datetime.datetime.utcnow(),
+            "datetime_dt": datetime.datetime.now(datetime.timezone.utc),
         },
         {
             "id": "N1234567",
@@ -914,7 +863,7 @@ if __name__ == "__main__":
             "heading": 0.0,
             "vel_h": 5.1,
             "vel_v": -5.0,
-            "datetime_dt": datetime.datetime.utcnow(),
+            "datetime_dt": datetime.datetime.now(datetime.timezone.utc),
         },
         {
             "id": "M1234567",
@@ -932,7 +881,7 @@ if __name__ == "__main__":
             "heading": 0.0,
             "vel_h": 5.1,
             "vel_v": -5.0,
-            "datetime_dt": datetime.datetime.utcnow(),
+            "datetime_dt": datetime.datetime.now(datetime.timezone.utc),
         },
     ]
 

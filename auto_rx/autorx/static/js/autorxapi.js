@@ -2,7 +2,7 @@
 
 function update_task_list(){
     // Grab the latest task list.
-    $.getJSON("/get_task_list", function(data){
+    $.getJSON("get_task_list", function(data){
         var task_info = "";
 
         $('#stop-frequency-select').children().remove();
@@ -10,8 +10,14 @@ function update_task_list(){
         added_decoders = false;
 
         for (_task in data){
-            // Append the current task to the task list text.
-            task_info += "SDR #" + _task + ": " + data[_task]["task"] + "    ";
+            // Append the current task to the task list.
+            if(_task.includes("SPY")){
+                task_detail = _task + " - "
+            }else{
+                task_detail = "SDR:" + _task + " - "
+            }
+
+
             if(data[_task]["freq"] > 0.0){
                 $('#stop-frequency-select')
                     .append($("<option></option>")
@@ -19,7 +25,22 @@ function update_task_list(){
                     .text( (parseFloat( data[_task]["freq"] )/1e6).toFixed(3)));
 
                 added_decoders = true;
+
+                task_detail += (parseFloat( data[_task]["freq"] )/1e6).toFixed(3);
+
+                if (data[_task].hasOwnProperty("type")){
+                    task_detail += " " + data[_task]["type"];
+                }
+                
+            } else {
+                if(data[_task]["task"] == "Scanning"){
+                    task_detail += "Scan";
+                } else {
+                    task_detail += "Idle";
+                }
             }
+
+            task_info += "<div class='sdrinfo-element'>" + task_detail + "</div>"
         }
 
         if(added_decoders == false){
@@ -30,7 +51,7 @@ function update_task_list(){
         }
         
         // Update page with latest task.
-        $('#task_status').text(task_info);
+        $('#task_status').html(task_info);
         
         setTimeout(resume_web_controls,2000);
     });
@@ -41,6 +62,7 @@ function disable_web_controls(){
     $("#verify-password").prop('disabled', true);
     $("#start-decoder").prop('disabled', true);
     $("#stop-decoder").prop('disabled', true);
+    $("#stop-decoder-lockout").prop('disabled', true);
     $("#enable-scanner").prop('disabled', true);
     $("#disable-scanner").prop('disabled', true);
     $("#frequency-input").prop('disabled', true);
@@ -54,6 +76,7 @@ function pause_web_controls() {
     $("#verify-password").prop('disabled', true);
     $("#start-decoder").prop('disabled', true);
     $("#stop-decoder").prop('disabled', true);
+    $("#stop-decoder-lockout").prop('disabled', true);
     $("#enable-scanner").prop('disabled', true);
     $("#disable-scanner").prop('disabled', true);
     $("#frequency-input").prop('disabled', true);
@@ -65,6 +88,7 @@ function resume_web_controls() {
     $("#verify-password").prop('disabled', false);
     $("#start-decoder").prop('disabled', false);
     $("#stop-decoder").prop('disabled', false);
+    $("#stop-decoder-lockout").prop('disabled', false);
     $("#enable-scanner").prop('disabled', false);
     $("#disable-scanner").prop('disabled', false);
     $("#frequency-input").prop('disabled', false);
@@ -96,7 +120,7 @@ function verify_password(){
 
     // Do the request
     $.post(
-        "/check_password", 
+        "check_password", 
         {"password": _api_password},
         function(data){
             // If OK, update the header to indicate the password was OK.
@@ -125,7 +149,7 @@ function disable_scanner(){
 
     // Do the request
     $.post(
-        "/disable_scanner", 
+        "disable_scanner", 
         {"password": _api_password},
         function(data){
             //console.log(data);
@@ -162,7 +186,7 @@ function enable_scanner(){
 
     // Do the request
     $.post(
-        "/enable_scanner", 
+        "enable_scanner", 
         {"password": _api_password},
         function(data){
             //console.log(data);
@@ -194,8 +218,43 @@ function stop_decoder(){
 
     // Do the request
     $.post(
-        "/stop_decoder", 
+        "stop_decoder", 
         {password: _api_password, freq: _decoder},
+        function(data){
+            //console.log(data);
+            pause_web_controls();
+            setTimeout(resume_web_controls,10000);
+            // Need to figure out where to put this data..
+        }
+    ).fail(function(xhr, status, error){
+        console.log(error);
+        // Otherwise, we probably got a 403 error (forbidden) which indicates the password was bad.
+        if(error == "FORBIDDEN"){
+            $("#password-header").html("<h2>Incorrect Password</h2>");
+        } else if (error == "NOT FOUND"){
+            // Scanner isn't running. Don't do anything.
+            alert("Decoder on supplied frequency not running!");
+        }
+    });
+}
+
+function stop_decoder_lockout(){
+    // Stop the decoder on the requested frequency, and lockout frequency
+
+    // Re-verify the password. This will occur async, so wont stop the main request from going ahead,
+    // but will at least present an error for the user.
+    verify_password();
+
+    // Grab the password
+    _api_password = getCookie("password");
+
+    // Grab the selected frequency
+    _decoder = $('#stop-frequency-select').val();
+
+    // Do the request
+    $.post(
+        "stop_decoder", 
+        {password: _api_password, freq: _decoder, lockout: 1},
         function(data){
             //console.log(data);
             pause_web_controls();
@@ -245,7 +304,7 @@ function start_decoder(){
 
     // Do the request
     $.post(
-        "/start_decoder", 
+        "start_decoder", 
         {password: _api_password, freq: _freq_hz, type: _type},
         function(data){
             alert("Added requested decoder to results queue.")

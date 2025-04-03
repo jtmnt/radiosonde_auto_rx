@@ -6,14 +6,24 @@
 #ifndef M_PI
     #define M_PI  (3.1415926535897932384626433832795)
 #endif
+#define _2PI  (6.2831853071795864769252867665590)
 
 
+#define LP_IQ    1
+#define LP_FM    2
+#define LP_IQFM  4
+
+
+#ifndef INTTYPES
+#define INTTYPES
 typedef unsigned char  ui8_t;
 typedef unsigned short ui16_t;
 typedef unsigned int   ui32_t;
+typedef unsigned long long ui64_t;
 typedef char  i8_t;
 typedef short i16_t;
 typedef int   i32_t;
+#endif
 
 
 typedef struct {
@@ -58,6 +68,9 @@ typedef struct {
     float mv;
     ui32_t mv_pos;
     //
+    float mv2;
+    ui32_t mv2_pos;
+    //
     int N_norm;
     int Nvar;
     float xsum;
@@ -72,6 +85,10 @@ typedef struct {
     float complex *rot_iqbuf;
     float complex F1sum;
     float complex F2sum;
+    //
+    double complex iw1;
+    double complex iw2;
+
 
     //
     char *rawbits;
@@ -91,6 +108,7 @@ typedef struct {
     double dc;
     double Df;
     double dDf;
+    //
 
     ui32_t sample_posframe;
     ui32_t sample_posnoise;
@@ -100,12 +118,14 @@ typedef struct {
     double SNRdB;
 
     // decimate
+    int opt_nolut; // default: LUT
     int opt_IFmin;
     int decM;
     ui32_t sr_base;
     ui32_t dectaps;
-    ui32_t sample_dec;
+    ui32_t sample_decX;
     ui32_t lut_len;
+    ui32_t sample_decM;
     float complex *decXbuffer;
     float complex *decMbuf;
     float complex *ex; // exp_lut
@@ -126,7 +146,7 @@ typedef struct {
     int lpFMtaps; // ui32_t
     float *ws_lpFM;
     float *lpFM_buf;
-	float *fm_buffer;
+    float *fm_buffer;
 
 } dsp_t;
 
@@ -156,7 +176,7 @@ typedef struct {
 } hdb_t;
 
 
-float read_wav_header(pcm_t *, FILE *);
+int read_wav_header(pcm_t *, FILE *);
 int f32buf_sample(dsp_t *, int);
 int read_slbit(dsp_t *, int*, int, int, int, float, int);
 int read_softbit(dsp_t *, hsbit_t *, int, int, int, float, int);

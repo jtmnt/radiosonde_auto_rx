@@ -60,10 +60,12 @@ typedef struct {
     i8_t sat;  // GPS sat data
     i8_t ptu;  // PTU: temperature humidity (pressure)
     i8_t dwp;  // PTU derived: dew point
+    i8_t aux;  // decode xdata
     i8_t inv;
     i8_t aut;
     i8_t jsn;  // JSON output (auto_rx)
     i8_t slt;  // silent (only raw/json)
+    i8_t cal;  // json cal/conf
 } option_t;
 
 typedef struct {
@@ -116,6 +118,9 @@ typedef struct {
     ui8_t dfrm_bitscore[FRAME_LEN];
     ui8_t calibytes[51*16];
     ui8_t calfrchk[51];
+    ui8_t calconf_complete;
+    ui8_t calconf_sent;
+    ui8_t *calconf_subfrm; // 1+16 byte cal/conf subframe
     float ptu_Rf1;      // ref-resistor f1 (750 Ohm)
     float ptu_Rf2;      // ref-resistor f2 (1100 Ohm)
     float ptu_co1[3];   // { -243.911 , 0.187654 , 8.2e-06 }
@@ -138,6 +143,7 @@ typedef struct {
     ui16_t conf_cd; // kill countdown (sec) (kt or bt)
     ui8_t  conf_bk; // burst kill
     char rstyp[9];  // RS41-SG, RS41-SGP
+    char rsm[10];   // RSM421
     int  aux;
     char xdata[XDATA_LEN+16]; // xdata: aux_str1#aux_str2 ...
     option_t option;
@@ -265,15 +271,15 @@ float r4(ui8_t *bytes) {
 }
 */
 
-static int crc16(gpx_t *gpx, int start, int len) {
+static int crc16(ui8_t data[], int len) {
     int crc16poly = 0x1021;
     int rem = 0xFFFF, i, j;
     int byte;
 
-    if (start+len+2 > FRAME_LEN) return -1;
+    //if (start+len+2 > FRAME_LEN) return -1;
 
     for (i = 0; i < len; i++) {
-        byte = gpx->frame[start+i];
+        byte = data[i];
         rem = rem ^ (byte << 8);
         for (j = 0; j < 8; j++) {
             if (rem & 0x8000) {
@@ -296,7 +302,7 @@ static int check_CRC(gpx_t *gpx, ui32_t pos, ui32_t pck) {
     crclen = gpx->frame[pos+1];
     if (pos + crclen + 4 > FRAME_LEN) return -1;
     crcdat = u2(gpx->frame+pos+2+crclen);
-    if ( crcdat != crc16(gpx, pos+2, crclen) ) {
+    if ( crcdat != crc16(gpx->frame+pos+2, crclen) ) {
         return 1;  // CRC NO
     }
     else return 0; // CRC OK
@@ -329,7 +335,8 @@ GPS chip: ublox UBX-G6010-ST
 #define pos_Calburst    0x05E  // 1 byte, calfr 0x02
 // ? #define pos_Caltimer  0x05A  // 2 byte, calfr 0x02 ?
 #define pos_CalRSTyp    0x05B  // 8 byte, calfr 0x21 (+2 byte in 0x22?)
-        // weitere chars in calfr 0x22/0x23; weitere ID
+        // weitere chars in calfr 0x22/0x23; weitere ID (RSM)
+#define pos_CalRSM      0x055  // 6 byte, calfr 0x22
 
 #define crc_PTU        (1<<1)
 #define xor_PTU        0xE388  // ^0x99A2=0x0x7A2A
@@ -447,6 +454,9 @@ static int get_SondeID(gpx_t *gpx, int crc, int ofs) {
             memset(gpx->calfrchk, 0, 51); // 0x00..0x32
             // reset conf data
             memset(gpx->rstyp, 0, 9);
+            memset(gpx->rsm, 0, 10);
+            gpx->calconf_complete = 0;
+            gpx->calconf_sent = 0;
             gpx->freq = 0;
             gpx->conf_fw = 0;
             gpx->conf_bt = 0;
@@ -454,10 +464,16 @@ static int get_SondeID(gpx_t *gpx, int crc, int ofs) {
             gpx->conf_cd = -1;
             gpx->conf_kt = -1;
             // don't reset gpx->frame[] !
-            gpx->T = -273.15;
-            gpx->RH = -1.0;
-            gpx->P = -1.0;
-            gpx->RH2 = -1.0;
+            gpx->jahr = 0; gpx->monat = 0; gpx->tag = 0;
+            gpx->std = 0; gpx->min = 0; gpx->sek = 0.0;
+            gpx->week = 0;
+            gpx->lat = 0.0; gpx->lon = 0.0; gpx->alt = 0.0;
+            gpx->vH  = 0.0; gpx->vD  = 0.0; gpx->vV  = 0.0;
+            gpx->numSV = 0;
+            gpx->T = -273.15f;
+            gpx->RH = -1.0f;
+            gpx->P = -1.0f;
+            gpx->RH2 = -1.0f;
             // new ID:
             memcpy(gpx->id, sondeid_bytes, 8);
             gpx->id[8] = '\0';
@@ -494,6 +510,19 @@ static int get_FrameConf(gpx_t *gpx, int ofs) {
 
         gpx->ecdat.last_calfrm = calfr;
         gpx->ecdat.last_calfrm_ts = gpx->ecdat.ts;
+
+        if ( !gpx->calconf_complete ) {
+            int sum = 0;
+            for (i = 0; i < 51; i++) { // 0x00..0x32
+                sum += gpx->calfrchk[i];
+            }
+            if (sum == 51) { // count all subframes
+                int calconf_dat = gpx->calibytes[0] | (gpx->calibytes[1]<<8);
+                int calconf_crc = crc16(gpx->calibytes+2, 50*16-2); // subframe 0x32 not included (variable)
+
+                if (calconf_dat == calconf_crc) gpx->calconf_complete = 1;
+            }
+        }
     }
 
     return err;
@@ -1063,12 +1092,217 @@ static int get_GPS3(gpx_t *gpx, int ofs) {
     return err;
 }
 
+
+static int hex2uint(char *str, int nibs) {
+    int i;
+    int erg = 0;
+    int h = 0;
+
+    if (nibs > 7) return -2;
+
+    for (i = 0; i < nibs; i++) { // MSB i.e. most significant nibble first
+        if      (str[i] >= '0' && str[i] <= '9') h = str[i]-'0';
+        else if (str[i] >= 'a' && str[i] <= 'f') h = str[i]-'a'+0xA;
+        else if (str[i] >= 'A' && str[i] <= 'F') h = str[i]-'A'+0xA;
+        else return -1;
+        erg = (erg << 4) | (h & 0xF);
+    }
+    return erg;
+}
+
+static int prn_aux_IDx01(char *xdata) {
+// V7 ECC (Electrochemical Concentration Cell) Ozonesonde
+// https://gml.noaa.gov/aftp/user/jordan/iMet%20Radiosonde%20Protocol.pdf
+// https://harbor.weber.edu/Hardware/Ozonesonde/ECC_Ozonesonde-1.pdf
+// ID=0x01: ECC Ozonesonde
+// N=2*8  nibs (1byte = 2nibs) (MSB)
+//  0     2  u8   Instrument_type = 0x01 (ID)
+//  2     2  u8   Instrument_number
+//  4     4  u16  Icell, uA (I = n/1000)
+//  8     4  i16  Tpump, C (T = n/100)
+// 12     2  u8   Ipump, mA
+// 14     2  u8   Vbat, (V = n/10)
+//
+    int val;
+    i16_t Tpump;
+    ui16_t Icell;
+    ui8_t InstrNum, Ipump, Vbat;
+    char *px = xdata;
+    int N = 2*8;
+
+    if (*px) {
+
+        if (strncmp(px, "01", 2) != 0) {
+            px = strstr(xdata, "#01");
+            if (px == NULL) return -1;
+            else px += 1;
+        }
+        if (strlen(px) < N) return -1;
+
+        fprintf(stdout, " ID=0x01 ECC ");
+        val = hex2uint(px+ 2, 2);  if (val < 0) return -1;
+        InstrNum = val & 0xFF;
+        val = hex2uint(px+ 4, 4);  if (val < 0) return -1;
+        Icell = val & 0xFFFF; // u16
+        val = hex2uint(px+ 8, 4);  if (val < 0) return -1;
+        Tpump = val & 0xFFFF; // i16
+        val = hex2uint(px+12, 2);  if (val < 0) return -1;
+        Ipump = val & 0xFF;   // u8
+        val = hex2uint(px+14, 2);  if (val < 0) return -1;
+        Vbat  = val & 0xFF;   // u8
+        fprintf(stdout, " No.%d ", InstrNum);
+        fprintf(stdout, " Icell:%.3fuA ", Icell/1000.0);
+        fprintf(stdout, " Tpump:%.2fC ", Tpump/100.0);
+        fprintf(stdout, " Ipump:%dmA ", Ipump);
+        fprintf(stdout, " Vbat:%.1fV ", Vbat/10.0);
+    }
+    else {
+        return -2;
+    }
+
+    return 0;
+}
+
+static int prn_aux_IDx05(char *xdata) {
+// OIF411
+// "Ozone Sounding with Vaisala Radiosonde RS41" user's guide M211486EN
+//
+// ID=0x05: OIF411
+// pos    nibs (MSB)
+//  0     2  u8   Instrument_type = 0x05 (ID)
+//  2     2  u8   Instrument_number
+// Measurement Data, N=2*10
+//  4     4  i16  Tpump, C (T = n/100)
+//  8     5  u20  Icell, uA (I = n/10000)
+// 13     2  u8   Vbat, (V = n/10)
+// 15     3  u12  Ipump, mA
+// 18     2  u8   Vext, (V = n/10)
+// ID Data, N=2*10+1
+//  4     8  char OIF411 Serial
+// 12     4  u16  Diagnostics Word
+// 16   2?4  u16? SW version (n/100)
+// 20     1  char I
+//
+    char *px = xdata;
+    int N = 2*10;
+    int val;
+    ui8_t InstrNum;
+
+    if (*px) {
+
+        if (strncmp(px, "05", 2) != 0) {
+            px = strstr(xdata, "#05");
+            if (px == NULL) return -1;
+            else px += 1;
+        }
+        if (strlen(px) < N) return -1;
+
+        fprintf(stdout, " ID=0x05 OIF411 ");
+        val = hex2uint(px+ 2, 2);  if (val < 0) return -1;
+        InstrNum = val & 0xFF;
+        fprintf(stdout, " No.%d ", InstrNum);
+
+        if (px[N] == 'I') {
+            ui16_t dw;
+            ui16_t sw;
+            char sn[9];
+            // 5.2 ID Data
+            //
+            N += 1;
+            strncpy(sn, px+4, 8); sn[8] = '\0';
+            val = hex2uint(px+12, 4);  if (val < 0) return -1;
+            dw = val & 0xFFFF;  // i16
+            val = hex2uint(px+16, 4);  if (val < 0) return -1;
+            sw = val & 0xFFFF;  // u8
+            fprintf(stdout, " SN:%s ", sn);
+            fprintf(stdout, " DW:%04X ", dw);
+            fprintf(stdout, " SW:%.2f ", sw/100.0);
+            // Diagnostics Word dw
+            // 0000 = "Default value, no diagnostics bits active"
+            // 0004 = "Ozone pump temperature below -5C"
+            // 0400 = "Ozone pump battery voltage (+VBatt) is not connected to OIF411"
+            // 0404 = 0004 | 0400
+        }
+        else {
+            ui32_t Icell;
+            ui16_t Ipump;
+            i16_t Tpump;
+            ui8_t InstrNum, Vbat, Vext;
+            // 5.1 Measurement Data
+            //
+            val = hex2uint(px+ 4, 4);  if (val < 0) return -1;
+            Tpump = val & 0xFFFF;  // i16
+            val = hex2uint(px+ 8, 5);  if (val < 0) return -1;
+            Icell = val & 0xFFFFF; // u20
+            val = hex2uint(px+13, 2);  if (val < 0) return -1;
+            Vbat  = val & 0xFF;    // u8
+            val = hex2uint(px+15, 3);  if (val < 0) return -1;
+            Ipump = val & 0xFFF;   // u12
+            val = hex2uint(px+18, 2);  if (val < 0) return -1;
+            Vext  = val & 0xFF;    // u8
+            fprintf(stdout, " Tpump:%.2fC ", Tpump/100.0);
+            fprintf(stdout, " Icell:%.4fuA ", Icell/10000.0);
+            fprintf(stdout, " Vbat:%.1fV ", Vbat/10.0);
+            fprintf(stdout, " Ipump:%dmA ", Ipump);
+            fprintf(stdout, " Vext:%.1fV ", Vext/10.0);
+        }
+    }
+    else {
+        return -2;
+    }
+
+    return 0;
+}
+
+static int prn_aux_IDx08(char *xdata) {
+// CFH Cryogenic Frost Point Hygrometer
+// ID=0x08: CFH
+// N=2*12 nibs
+//  0     2  u8   Instrument_type = 0x08 (ID)
+//  2     2  u8   Instrument_number
+//  4     6       Tmir, Mirror Temperature
+// 10     6       Vopt, Optics Voltage
+// 16     4       Topt, Optics Temperature
+// 20     4       Vbat, CFH Battery
+//
+    char *px = xdata;
+    int N = 2*12;
+    int val;
+    ui8_t InstrNum;
+
+    if (*px) {
+
+        if (strncmp(px, "08", 2) != 0) {
+            px = strstr(xdata, "#08");
+            if (px == NULL) return -1;
+            else px += 1;
+        }
+        if (strlen(px) < N) return -1;
+
+        fprintf(stdout, " ID=0x08 CFH ");
+        val = hex2uint(px+ 2, 2);  if (val < 0) return -1;
+        InstrNum = val & 0xFF;
+        fprintf(stdout, " No.%d ", InstrNum);
+        fprintf(stdout, " Tmir:0x%.6s ", px+4);
+        fprintf(stdout, " Vopt:0x%.6s ", px+10);
+        fprintf(stdout, " Topt:0x%.4s ", px+16);
+        fprintf(stdout, " Vbat:0x%.4s ", px+20);
+
+    }
+    else {
+        return -2;
+    }
+
+    return 0;
+}
+
 static int get_Aux(gpx_t *gpx, int out, int pos) {
 //
-// "Ozone Sounding with Vaisala Radiosonde RS41" user's guide
+// "Ozone Sounding with Vaisala Radiosonde RS41" user's guide M211486EN
 //
     int auxlen, auxcrc, count7E, pos7E;
     int i, n;
+    char *paux;
 
     n = 0;
     count7E = 0;
@@ -1084,7 +1318,7 @@ static int get_Aux(gpx_t *gpx, int out, int pos) {
             auxlen = gpx->frame[pos+1];
             auxcrc = gpx->frame[pos+2+auxlen] | (gpx->frame[pos+2+auxlen+1]<<8);
 
-            if ( auxcrc == crc16(gpx, pos+2, auxlen) ) {
+            if ( pos + auxlen + 4 <= FRAME_LEN && auxcrc == crc16(gpx->frame+pos+2, auxlen) ) {
                 if (count7E == 0) {
                     if (out) fprintf(stdout, "\n # xdata = ");
                 }
@@ -1113,6 +1347,34 @@ static int get_Aux(gpx_t *gpx, int out, int pos) {
     }
     gpx->xdata[n] = '\0';
 
+    // decode OIF411 xdata
+    paux = gpx->xdata;
+    if (out && gpx->option.aux && *paux)
+    {
+        int val;
+        ui8_t ID;
+        for (i = 0; i < count7E; i++) {
+            if (paux > gpx->xdata) {
+                //while (paux < (gpx->xdata)+n && *paux != '#') paux++;
+                while (*paux && *paux != '#') paux++;
+                paux++;
+            }
+            if (strlen(paux) > 2) {
+                val = hex2uint(paux, 2);
+                if (val < 0) { paux += 2; continue; }
+                ID = val & 0xFF;
+                switch (ID) {
+                    case 0x01: fprintf(stdout, "\n"); prn_aux_IDx01(paux); break;
+                    case 0x05: fprintf(stdout, "\n"); prn_aux_IDx05(paux); break;
+                    case 0x08: fprintf(stdout, "\n"); prn_aux_IDx08(paux); break;
+                }
+                paux++;
+            }
+            else break;
+        }
+        if ( !gpx->option.jsn ) fprintf(stdout, "\n");
+    }
+
     i = check_CRC(gpx, pos, pck_ZERO);  // 0x76xx: 00-padding block
     if (i) gpx->crc |= crc_ZERO;
 
@@ -1126,7 +1388,10 @@ static int get_Calconf(gpx_t *gpx, int out, int ofs) {
     ui16_t fw = 0;
     int freq = 0, f0 = 0, f1 = 0;
     char sondetyp[9];
+    char rsmtyp[10];
     int err = 0;
+
+    gpx->calconf_subfrm = gpx->frame+pos_CalData+ofs;
 
     byte = gpx->frame[pos_CalData+ofs];
     calfr = byte;
@@ -1210,6 +1475,17 @@ static int get_Calconf(gpx_t *gpx, int out, int ofs) {
                     if (qfe2 > 0.0) fprintf(stdout, "QFE2:%.1fhPa ", qfe2);
                 }
             }
+        }
+
+        if (calfr == 0x22) {
+            for (i = 0; i < 10; i++) rsmtyp[i] = 0;
+            for (i = 0; i < 8; i++) {
+                byte = gpx->frame[pos_CalRSM+ofs + i];
+                if ((byte >= 0x20) && (byte < 0x7F)) rsmtyp[i] = byte;
+                else /*if (byte == 0x00)*/ rsmtyp[i] = '\0';
+            }
+            if (out && gpx->option.vbs) fprintf(stdout, ": %s ", rsmtyp);
+            strcpy(gpx->rsm, rsmtyp);
         }
     }
 
@@ -1848,6 +2124,55 @@ static int print_position(gpx_t *gpx, int ec) {
                             if (gpx->freq > 0) fq_kHz = gpx->freq;
                             fprintf(stdout, ", \"freq\": %d", fq_kHz);
                         }
+                        if (*gpx->rsm) {  // RSM type
+                            fprintf(stdout, ", \"rs41_mainboard\": \"%s\"", gpx->rsm);
+                        }
+                        if (gpx->conf_fw) {  // firmware
+                            fprintf(stdout, ", \"rs41_mainboard_fw\": %d", gpx->conf_fw);
+                        }
+
+                        if (gpx->option.cal == 1) {  // cal/conf
+                            int _j;
+                            if ( !gpx->calconf_sent && gpx->calconf_complete ) {
+                                /*
+                                fprintf(stdout, ", \"rs41_calconf320h\": \""); // only constant/crc part
+                                for (int _j = 0; _j < 50*16; _j++) {
+                                    fprintf(stdout, "%02X", gpx->calibytes[_j]);
+                                }
+                                */
+                                fprintf(stdout, ", \"rs41_calconf51x16\": \"");
+                                for (_j = 0; _j < 51*16; _j++) {
+                                    fprintf(stdout, "%02X", gpx->calibytes[_j]);
+                                }
+                                fprintf(stdout, "\"");
+                                gpx->calconf_sent = 1;
+                            }
+                            if (gpx->calconf_subfrm[0] == 0x32) {
+                                fprintf(stdout, ", \"rs41_conf0x32\": \"");
+                                for (_j = 0; _j < 16; _j++) {
+                                    fprintf(stdout, "%02X", gpx->calconf_subfrm[1+_j]);
+                                }
+                                fprintf(stdout, "\"");
+                            }
+                        }
+                        if (gpx->option.cal == 2) {  // cal/conf
+                            int _j;
+                            fprintf(stdout, ", \"rs41_subfrm\": \"0x%02X:", gpx->calconf_subfrm[0]);
+                            for (_j = 0; _j < 16; _j++) {
+                                fprintf(stdout, "%02X", gpx->calconf_subfrm[1+_j]);
+                            }
+                            fprintf(stdout, "\"");
+                        }
+
+                        // Include frequency derived from subframe information if available.
+                        if (gpx->freq > 0) {
+                            fprintf(stdout, ", \"tx_frequency\": %d", gpx->freq );
+                        }
+
+                        // Reference time/position
+                        fprintf(stdout, ", \"ref_datetime\": \"%s\"", "GPS" ); // {"GPS", "UTC"} GPS-UTC=leap_sec
+                        fprintf(stdout, ", \"ref_position\": \"%s\"", "GPS" ); // {"GPS", "MSL"} GPS=ellipsoid , MSL=geoid
+
                         #ifdef VER_JSN_STR
                             ver_jsn = VER_JSN_STR;
                         #endif
@@ -1872,7 +2197,10 @@ static int print_position(gpx_t *gpx, int ec) {
         if (gpx->option.ptu) out_mask |= crc_PTU;
 
         err = get_FrameConf(gpx, 0);
-        if (out && !err) prn_frm(gpx);
+        if (out && !err) {
+            prn_frm(gpx);
+            output = 1;
+        }
 
         pck = (gpx->frame[pos_PTU]<<8) | gpx->frame[pos_PTU+1];
         ofs = 0;
@@ -2022,6 +2350,7 @@ int main(int argc, char *argv[]) {
     int option_iqdc = 0;
     int option_lp = 0;
     int option_dc = 0;
+    int option_noLUT = 0;
     int option_bin = 0;
     int option_softin = 0;
     int option_pcmraw = 0;
@@ -2088,9 +2417,10 @@ int main(int argc, char *argv[]) {
         else if ( (strcmp(*argv, "-v") == 0) || (strcmp(*argv, "--verbose") == 0) ) {
             gpx.option.vbs = 1;
         }
-        else if   (strcmp(*argv, "-vx") == 0) { gpx.option.vbs = 2; }
+        else if   (strcmp(*argv, "-vx") == 0) { gpx.option.vbs = 2; } // xdata
         else if   (strcmp(*argv, "-vv") == 0) { gpx.option.vbs = 3; }
         //else if   (strcmp(*argv, "-vvv") == 0) { gpx.option.vbs = 4; }
+        else if   (strcmp(*argv, "--aux") == 0) { gpx.option.aux = 1; }
         else if   (strcmp(*argv, "--crc") == 0) { gpx.option.crc = 1; }
         else if ( (strcmp(*argv, "-r") == 0) || (strcmp(*argv, "--raw") == 0) ) {
             gpx.option.raw = 1;
@@ -2141,16 +2471,18 @@ int main(int argc, char *argv[]) {
             dsp.xlt_fq = -fq; // S(t) -> S(t)*exp(-f*2pi*I*t)
             option_iq = 5;
         }
-        else if   (strcmp(*argv, "--lp") == 0) { option_lp = 1; }  // IQ lowpass
+        else if   (strcmp(*argv, "--lpIQ") == 0) { option_lp |= LP_IQ; }  // IQ/IF lowpass
         else if   (strcmp(*argv, "--lpbw") == 0) {  // IQ lowpass BW / kHz
             double bw = 0.0;
             ++argv;
             if (*argv) bw = atof(*argv);
             else return -1;
             if (bw > 4.6 && bw < 24.0) lpIQ_bw = bw*1e3;
-            option_lp = 1;
+            option_lp |= LP_IQ;
         }
+        else if   (strcmp(*argv, "--lpFM") == 0) { option_lp |= LP_FM; }  // FM lowpass
         else if   (strcmp(*argv, "--dc") == 0) { option_dc = 1; }
+        else if   (strcmp(*argv, "--noLUT") == 0) { option_noLUT = 1; }
         else if   (strcmp(*argv, "--min") == 0) {
             option_min = 1;
         }
@@ -2166,6 +2498,8 @@ int main(int argc, char *argv[]) {
             if (frq < 300000000) frq = -1;
             cfreq = frq;
         }
+        else if   (strcmp(*argv, "--jsnsubfrm1") == 0) { gpx.option.cal = 1; }  // json cal/conf
+        else if   (strcmp(*argv, "--jsnsubfrm2") == 0) { gpx.option.cal = 2; }  // json cal/conf
         else if   (strcmp(*argv, "--rawhex") == 0) { rawhex = 2; }  // raw hex input
         else if   (strcmp(*argv, "--xorhex") == 0) { rawhex = 2; xorhex = 1; }  // raw xor input
         else if (strcmp(*argv, "-") == 0) {
@@ -2196,6 +2530,13 @@ int main(int argc, char *argv[]) {
     }
     if (!wavloaded) fp = stdin;
 
+    if (option_iq == 5 && option_dc) option_lp |= LP_FM;
+
+    // LUT faster for decM, however frequency correction after decimation
+    // LUT recommonded if decM > 2
+    //
+    if (option_noLUT && option_iq == 5) dsp.opt_nolut = 1; else dsp.opt_nolut = 0;
+
 
     if (gpx.option.raw && gpx.option.jsn) gpx.option.slt = 1;
 
@@ -2205,8 +2546,17 @@ int main(int argc, char *argv[]) {
         rs_init_RS255(&gpx.RS);  // RS, GF
     }
 
+    if (gpx.option.aux) gpx.option.vbs = 2;
+
     // init gpx
     memcpy(gpx.frame, rs41_header_bytes, sizeof(rs41_header_bytes)); // 8 header bytes
+
+    gpx.calconf_subfrm = gpx.frame+pos_CalData;
+    if (gpx.option.cal) {
+        gpx.option.jsn = 1;
+        gpx.option.ecc = 2;
+        gpx.option.crc = 1;
+    }
 
     if (cfreq > 0) gpx.jsn_freq = (cfreq+500)/1000;
 
