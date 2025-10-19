@@ -269,6 +269,8 @@ def start_decoder(freq, sonde_type, continuous=False):
             exporter=exporter_functions,
             timeout=_timeout,
             telem_filter=telemetry_filter,
+            enable_realtime_filter=config["enable_realtime_filter"],
+            max_velocity=config["max_velocity"],
             rs92_ephemeris=rs92_ephemeris,
             rs41_drift_tweak=config["rs41_drift_tweak"],
             experimental_decoder=config["experimental_decoders"][_exp_sonde_type],
@@ -668,12 +670,19 @@ def telemetry_filter(telemetry):
     else:
         mrz_callsign_valid = False
 
+    # Dropsonde checks - filter out uninitialised dropsondes (all zero serial - 000000000)
+    if "RD41" in telemetry['type'] or "RD94" in telemetry["type"]:
+        dropsonde_callsign_valid = _serial != "000000000"
+    else:
+        dropsonde_callsign_valid = False
+
     # If Vaisala or DFMs, check the callsigns are valid. If M10/M20, iMet, MTS01 or LMS6, just pass it through - we get callsigns immediately and reliably from these.
     if (
         vaisala_callsign_valid
         or dfm_callsign_valid
         or meisei_callsign_valid
         or mrz_callsign_valid
+        or dropsonde_callsign_valid
         or ("M10" in telemetry["type"])
         or ("M20" in telemetry["type"])
         or ("LMS" in telemetry["type"])
@@ -690,6 +699,9 @@ def telemetry_filter(telemetry):
 
         if "MRZ" in telemetry["id"]:
             _id_msg += " Note: MRZ sondes may take a while to get an ID."
+
+        if "RD41" in telemetry["type"] or "RD94" in telemetry["type"]:
+            _id_msg += " Note: This may be an uninitialised dropsonde."
 
         logging.warning(_id_msg)
         return False
@@ -757,7 +769,7 @@ def main():
         "--type",
         type=str,
         default=None,
-        help="Immediately start a decoder for a provided sonde type (Valid Types: RS41, RS92, DFM, M10, M20, IMET, IMETWIDE, IMET5, LMS6, MK2LMS, MEISEI, MRZ)",
+        help="Immediately start a decoder for a provided sonde type (Valid Types: RS41, RS92, DFM, M10, M20, IMET, IMETWIDE, IMET5, LMS6, MK2LMS, MEISEI, MRZ, RD94RD41)",
     )
     parser.add_argument(
         "-t",

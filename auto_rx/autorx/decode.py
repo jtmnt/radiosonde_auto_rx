@@ -42,7 +42,8 @@ VALID_SONDE_TYPES = [
     "UDP",
     "WXR301",
     "WXRPN9",
-    "IMETWIDE"
+    "IMETWIDE",
+    "RD94RD41"
 ]
 
 # Known 'Drifty' Radiosonde types
@@ -124,7 +125,8 @@ class SondeDecoder(object):
         "UDP",
         "WXR301",
         "WXRPN9",
-        "IMETWIDE"
+        "IMETWIDE",
+        "RD94RD41"
     ]
 
     def __init__(
@@ -146,6 +148,8 @@ class SondeDecoder(object):
         exporter=None,
         timeout=180,
         telem_filter=None,
+        enable_realtime_filter=True,
+        max_velocity=300,
         rs92_ephemeris=None,
         rs41_drift_tweak=False,
         experimental_decoder=False,
@@ -214,6 +218,8 @@ class SondeDecoder(object):
         self.save_decode_iq = save_decode_iq
 
         self.telem_filter = telem_filter
+        self.enable_realtime_filter = enable_realtime_filter
+        self.max_velocity = max_velocity
         self.timeout = timeout
         self.rs92_ephemeris = rs92_ephemeris
         self.rs41_drift_tweak = rs41_drift_tweak
@@ -221,6 +227,9 @@ class SondeDecoder(object):
         self.save_raw_hex = save_raw_hex
         self.raw_file = None
         self.wideband_sondes = wideband_sondes
+
+        # Last decoded position of this sonde
+        self.last_positions = {}
 
         # Raw hex filename
         if self.save_raw_hex:
@@ -834,7 +843,7 @@ class SondeDecoder(object):
         """ Generate the shell command which runs the relevant radiosonde decoder - Experimental Decoders
 
         Returns:
-            Tuple(str, str, FSKDemodState) / None: The demod & decoder commands, and a FSKDemodStats object to process the demodulator statistics.
+            Tuple(str, str, FSKDemodStats) / None: The demod & decoder commands, and a FSKDemodStats object to process the demodulator statistics.
 
         """
 
@@ -883,9 +892,9 @@ class SondeDecoder(object):
             if self.save_decode_iq:
                 demod_cmd += f" tee {self.save_decode_iq_path} |"
 
-            # Use a 4800 Hz mask estimator to better avoid adjacent sonde issues.
-            # Also seems to give a small performance bump.
-            demod_cmd += "./fsk_demod --cs16 -b %d -u %d -s --mask 4800 --stats=%d 2 %d %d - -" % (
+            # Updated 2025-08-26 to bump mask estimator to 5000 Hz, increase timing estimator duration, and change oversampling rate
+            # From controlled testing this seems to improve weak signal performance.
+            demod_cmd += "./fsk_demod --cs16 -b %d -u %d -s --mask 5000 --nsym=300 -p 5 --stats=%d 2 %d %d - -" % (
                 _lower,
                 _upper,
                 _stats_rate,
@@ -974,6 +983,49 @@ class SondeDecoder(object):
             )
 
             # RS92s transmit continuously - average over the last 2 frames, and use a mean
+            demod_stats = FSKDemodStats(averaging_time=2.0, peak_hold=True)
+            self.rx_frequency = self.sonde_freq
+
+        elif self.sonde_type == "RD94RD41":
+            # RD94 / RD41 Dropsondes
+            _baud_rate = 4800
+            
+            _sample_rate = 48000
+            _lower = -20000
+            _upper = 20000
+
+
+            demod_cmd = get_sdr_iq_cmd(
+                sdr_type = self.sdr_type,
+                frequency = self.sonde_freq,
+                sample_rate = _sample_rate,
+                sdr_hostname = self.sdr_hostname,
+                sdr_port = self.sdr_port,
+                ss_iq_path = self.ss_iq_path,
+                rtl_device_idx = self.rtl_device_idx,
+                ppm = self.ppm,
+                gain = self.gain,
+                bias = self.bias,
+                dc_block = True
+            )
+
+            # Add in tee command to save IQ to disk if debugging is enabled.
+            if self.save_decode_iq:
+                demod_cmd += f" tee {self.save_decode_iq_path} |"
+
+            demod_cmd += "./fsk_demod --cs16 -b %d -u %d -s --stats=%d 2 %d %d - -" % (
+                _lower,
+                _upper,
+                _stats_rate,
+                _sample_rate,
+                _baud_rate,
+            )
+
+            decode_cmd = (
+                "./rd94rd41drop --json --softinv 2>/dev/null"
+            )
+
+            # RD94/RD41s transmit continuously - average over the last 2 frames, and use a mean
             demod_stats = FSKDemodStats(averaging_time=2.0, peak_hold=True)
             self.rx_frequency = self.sonde_freq
 
@@ -1647,9 +1699,10 @@ class SondeDecoder(object):
                 )
                 return False
 
-            if self.udp_mode:
-                # If we are accepting sondes via UDP, we make use of the 'type' field provided by
-                # the decoder.
+            if self.udp_mode or (self.sonde_type == "RD94RD41"):
+                # Cases where we need to accept a type field from the decoder
+                # - UDP mode, where we could be getting packets from multiple decoders.
+                # - Dropsonde decoder, which decodes both RD94 and RD41 dropsondes.
                 self.sonde_type = _telemetry["type"]
 
                 # If frequency has been provided, make used of it.
@@ -1809,6 +1862,17 @@ class SondeDecoder(object):
                     "%Y-%m-%dT%H:%M:%SZ"
                 )
 
+            # Dropsonde actions
+            # Same datetime issues as other sondes (no date provided)
+            if (self.sonde_type == "RD94") or (self.sonde_type == "RD41"):
+                # Fix up the time.
+                _telemetry["datetime_dt"] = fix_datetime(_telemetry["datetime"])
+                # Re-generate the datetime string.
+                _telemetry["datetime"] = _telemetry["datetime_dt"].strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+
+
             # RS41 Subframe Data Actions
             # We only upload the subframe data once.
             if 'rs41_calconf51x16' in _telemetry:
@@ -1872,6 +1936,41 @@ class SondeDecoder(object):
                 self.decoder_running = False
                 return False
 
+            # Run telemetry from DFM sondes through real-time filter
+            if self.enable_realtime_filter and (_telemetry["model"].startswith("DFM")):
+                # If sonde has already been received, calculate velocity
+                velocity = 0
+                if _telemetry["callsign"] in self.last_positions.keys():
+                    _last_position = self.last_positions[_telemetry["callsign"]]
+
+                    distance = position_info(
+                        (_last_position[0], _last_position[1], 0),
+                        (_telemetry["latitude"], _telemetry["longitude"], 0)
+                    )["great_circle_distance"] # distance is in metres
+                    time_diff = time.time() - _last_position[2] # seconds
+
+                    velocity = distance / time_diff # m/s
+
+                # Check if velocity is higher than allowed maximum
+                if velocity > self.max_velocity:
+                    _telem_ok = False
+                    self.log_debug(f"Dropped packet - Velocity ({velocity}) exceeds max ({self.max_velocity}).")
+
+                    # Reset last position to prevent an endless chain of rejecting telemetry
+                    del self.last_positions[_telemetry["callsign"]]
+                else:
+                    # Check passed, update last position and continue processing
+                    self.last_positions[_telemetry["callsign"]] = (
+                        _telemetry["latitude"],
+                        _telemetry["longitude"],
+                        time.time()
+                    )
+            
+            # Garbage collect last_positions list
+            for serial, position in self.last_positions.items():
+                # If last position packet was more than 3 hours ago, delete it from list
+                if time.time()-position[2] > 3*60*60:
+                    del self.last_positions[serial]
 
             # If the telemetry is OK, send to the exporter functions (if we have any).
             if self.exporters is None:
