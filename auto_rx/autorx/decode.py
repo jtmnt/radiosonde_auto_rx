@@ -1937,15 +1937,15 @@ class SondeDecoder(object):
                 return False
 
             # Run telemetry from DFM sondes through real-time filter
-            if self.enable_realtime_filter and (_telemetry["model"].startswith("DFM")):
+            if self.enable_realtime_filter and (_telemetry["type"].startswith("DFM")):
                 # If sonde has already been received, calculate velocity
                 velocity = 0
-                if _telemetry["callsign"] in self.last_positions.keys():
-                    _last_position = self.last_positions[_telemetry["callsign"]]
+                if _telemetry['id'] in self.last_positions.keys():
+                    _last_position = self.last_positions[_telemetry['id']]
 
                     distance = position_info(
                         (_last_position[0], _last_position[1], 0),
-                        (_telemetry["latitude"], _telemetry["longitude"], 0)
+                        (_telemetry["lat"], _telemetry["lon"], 0)
                     )["great_circle_distance"] # distance is in metres
                     time_diff = time.time() - _last_position[2] # seconds
 
@@ -1957,20 +1957,24 @@ class SondeDecoder(object):
                     self.log_debug(f"Dropped packet - Velocity ({velocity}) exceeds max ({self.max_velocity}).")
 
                     # Reset last position to prevent an endless chain of rejecting telemetry
-                    del self.last_positions[_telemetry["callsign"]]
+                    del self.last_positions[_telemetry['id']]
                 else:
                     # Check passed, update last position and continue processing
-                    self.last_positions[_telemetry["callsign"]] = (
-                        _telemetry["latitude"],
-                        _telemetry["longitude"],
+                    self.last_positions[_telemetry['id']] = (
+                        _telemetry["lat"],
+                        _telemetry["lon"],
                         time.time()
                     )
             
             # Garbage collect last_positions list
+            keys_to_delete = []
             for serial, position in self.last_positions.items():
                 # If last position packet was more than 3 hours ago, delete it from list
                 if time.time()-position[2] > 3*60*60:
-                    del self.last_positions[serial]
+                    keys_to_delete.append(serial)
+                    
+            for serial in keys_to_delete:
+                del self.last_positions[serial]
 
             # If the telemetry is OK, send to the exporter functions (if we have any).
             if self.exporters is None:
