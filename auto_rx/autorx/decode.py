@@ -231,6 +231,11 @@ class SondeDecoder(object):
         # Last decoded position of this sonde
         self.last_positions = {}
 
+        # Last valid telemetry cache for resending when positions become invalid
+        self.last_valid_telemetry = {}  # Store last valid telemetry per sonde ID
+        self.last_valid_send_time = {}  # Track when last valid was sent
+        self.resend_valid_interval = 300  # Resend last valid position after 5 minutes (300 seconds)
+
         # Raw hex filename
         if self.save_raw_hex:
             _outfilename = f"{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M%S')}_{self.sonde_type}_{int(self.sonde_freq)}.raw"
@@ -1981,11 +1986,36 @@ class SondeDecoder(object):
                 return
             else:
                 if _telem_ok == "OK":
+                    # Store this as the last valid telemetry
+                    _id = _telemetry.get("id")
+                    if _id:
+                        self.last_valid_telemetry[_id] = _telemetry.copy()
+                        self.last_valid_send_time[_id] = time.time()
+                    
                     for _exporter in self.exporters:
                         try:
                             _exporter(_telemetry)
                         except Exception as e:
                             self.log_error("Exporter Error %s" % str(e))
+                else:
+                    # Invalid position - check if we should resend last valid position
+                    _id = _telemetry.get("id")
+                    if _id and _id in self.last_valid_telemetry:
+                        _time_since_last_valid = time.time() - self.last_valid_send_time.get(_id, 0)
+                        if _time_since_last_valid >= self.resend_valid_interval:
+                            self.log_info(f"Resending last valid position for {_id} (no valid position for {_time_since_last_valid:.0f}s)")
+                            _last_valid = self.last_valid_telemetry[_id].copy()
+                            # Update the datetime to current time
+                            _last_valid["datetime_dt"] = datetime.datetime.now(datetime.timezone.utc)
+                            _last_valid["datetime"] = _last_valid["datetime_dt"].strftime("%Y-%m-%dT%H:%M:%SZ")
+                            
+                            self.last_valid_send_time[_id] = time.time()
+                            
+                            for _exporter in self.exporters:
+                                try:
+                                    _exporter(_last_valid)
+                                except Exception as e:
+                                    self.log_error("Exporter Error %s" % str(e))
 
             return _telem_ok
 
